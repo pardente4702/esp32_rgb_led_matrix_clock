@@ -1,7 +1,5 @@
 #include <ESP32-HUB75-MatrixPanel-I2S-DMA.h>
 #include <WiFi.h>
-// #include <NTPClient.h>
-// #include <WiFiUdp.h>
 #include <RTClib.h>
 #include <SHT21.h>
 #include "WifiCredentials.h"
@@ -9,10 +7,6 @@
 #include <HTTPClient.h>
 #include <tinyxml2.h>
 #include <List.hpp>
-
-// Configurazione NTP
-// WiFiUDP ntpUDP;
-// NTPClient timeClient(ntpUDP, "pool.ntp.org", 7200, 60000);
 
 #define R1_PIN 25
 #define G1_PIN 26
