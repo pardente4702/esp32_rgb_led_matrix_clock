@@ -7,6 +7,7 @@
 #include <HTTPClient.h>
 #include <tinyxml2.h>
 #include <List.hpp>
+#include <expat.h>
 
 #define R1_PIN 25
 #define G1_PIN 26
@@ -39,7 +40,7 @@ uint16_t myGREEN = dma_display->color565(0, 255, 0);
 uint16_t myBLUE = dma_display->color565(0, 0, 255);
 
 char lastTimeStr[9] = "00:00:00";
-char scrollingText[256];
+char scrollingText[256] = {0};
 int textX = PANEL_RES_X;
 
 RTC_DS3231 rtc;
@@ -61,15 +62,25 @@ volatile bool hourInterrupt = false;
 const int brightnessMin = 30;  // minimo di notte
 const int brightnessMax = 220; // massimo di giorno
 
-uint32_t newsUpdateInterval = 900000; // 15 minuti
+uint32_t newsUpdateInterval = 300000; // 5 minuti
 
 int brightness = brightnessMax;
 
 const char *rss_feed_url = "https://www.ansa.it/lazio/notizie/lazio_rss.xml";
+// const char *rss_feed_url = "https://www.ansa.it/sito/notizie/cronaca/cronaca_rss.xml";
 
 uint8_t indiceNotizia = 0;
 
 List<String> newsList;
+
+String currentTitle = "";
+
+#define BUFFER_SIZE 512
+
+char cdataBuffer[BUFFER_SIZE];
+size_t cdataPos = 0;
+bool insideItem = false;
+bool insideTitle = false;
 
 enum DataGiornoState
 {
@@ -126,16 +137,6 @@ void syncRTCwithNTP()
     Serial.print("RTC updated to: ");
     Serial.println(&timeinfo, "%A, %d %B %Y %H:%M:%S");
   }
-
-  /*
-  Serial.println("Syncing RTC with NTP...");
-  timeClient.update();
-
-  unsigned long epochTime = timeClient.getEpochTime();
-  DateTime ntpTime(epochTime);
-  rtc.adjust(ntpTime);
-  Serial.println(ntpTime.timestamp());
-  */
 }
 
 char *convertiAccentate(const char *input)
@@ -208,40 +209,71 @@ char *convertiAccentate(const char *input)
   return output;
 }
 
-void parseRSSFeed(String xmlData)
+void XMLCALL startElement(void *userData, const char *name, const char **atts)
 {
-  tinyxml2::XMLDocument doc;
-  doc.Parse(xmlData.c_str());
-
-  tinyxml2::XMLElement *root = doc.RootElement();
-  if (root != nullptr)
+  if (strcmp(name, "item") == 0)
   {
-    for (tinyxml2::XMLElement *item = root->FirstChildElement("channel")->FirstChildElement("item"); item != nullptr; item = item->NextSiblingElement("item"))
-    {
-      const char *title = item->FirstChildElement("title")->GetText();
-      const char *description = item->FirstChildElement("description")->GetText();
-      const char *link = item->FirstChildElement("link")->GetText();
-
-      // Serial.print("**Title: ");
-      // Serial.println(title);
-      title = convertiAccentate(title);
-      newsList.add(title);
-      /*
-      Serial.print("**Description: ");
-      Serial.println(description);
-      Serial.print("**Link: ");
-      Serial.println(link);
-      Serial.println();
-      */
-    }
-    Serial.print("Number of news items: ");
-    Serial.println(newsList.getSize());
+    insideItem = true;
   }
-  else
+  else if (insideItem && strcmp(name, "title") == 0)
   {
-    Serial.println("Failed to parse RSS feed.");
+    insideTitle = true;
+    cdataPos = 0;
+    cdataBuffer[0] = '\0';
   }
 }
+
+void XMLCALL endElement(void *userData, const char *name)
+{
+  if (strcmp(name, "item") == 0)
+  {
+    insideItem = false;
+  }
+  else if (strcmp(name, "title") == 0 && insideTitle)
+  {
+    insideTitle = false;
+    Serial.print("Titolo: ");
+    Serial.println(cdataBuffer);
+    newsList.add(cdataBuffer); // Aggiungi il titolo alla lista delle notizie
+  }
+}
+
+void XMLCALL characterData(void *userData, const char *s, int len)
+{
+  if (insideTitle && cdataPos + len < BUFFER_SIZE - 1)
+  {
+    strncat(cdataBuffer, s, len);
+    cdataPos += len;
+    cdataBuffer[cdataPos] = '\0';
+  }
+}
+
+/*
+void parseXML(const String &xmlData)
+{
+  // Crea il parser Expat
+  XML_Parser parser = XML_ParserCreate(NULL);
+  if (!parser)
+  {
+    Serial.println("Errore nella creazione del parser Expat!");
+    return;
+  }
+
+  // Imposta i callback
+  XML_SetElementHandler(parser, startElement, endElement);
+  XML_SetCharacterDataHandler(parser, characterData);
+
+  // Passa i dati XML al parser
+  if (XML_Parse(parser, xmlData.c_str(), xmlData.length(), true) == XML_STATUS_ERROR)
+  {
+    Serial.print("Errore nel parsing XML: ");
+    Serial.println(XML_ErrorString(XML_GetErrorCode(parser)));
+  }
+
+  // Libera il parser
+  XML_ParserFree(parser);
+}
+  */
 
 void fetchRSSFeed()
 {
@@ -254,11 +286,23 @@ void fetchRSSFeed()
 
     if (httpCode > 0)
     {
-      String payload = http.getString();
-      Serial.println("RSS Feed data received.");
+      newsList.removeAll(); // Pulisce la lista delle notizie
+      WiFiClient *stream = http.getStreamPtr();
+      XML_Parser parser = XML_ParserCreate(NULL);
+      XML_SetElementHandler(parser, startElement, endElement);
+      XML_SetCharacterDataHandler(parser, characterData);
 
-      newsList.removeAll();
-      parseRSSFeed(payload);
+      char buffer[BUFFER_SIZE];
+      while (stream->connected() && stream->available())
+      {
+        size_t len = stream->readBytes(buffer, sizeof(buffer));
+        if (!XML_Parse(parser, buffer, len, len == 0))
+        {
+          Serial.printf("Errore nel parsing XML: %s\n", XML_ErrorString(XML_GetErrorCode(parser)));
+          break;
+        }
+      }
+      XML_ParserFree(parser);
     }
     else
     {
@@ -311,15 +355,6 @@ String readTemperatureAndHumidity()
     Serial.println("Errore nella lettura del sensore!");
     return "";
   }
-
-  /*
-    Serial.print("Temperatura: ");
-    Serial.print(temperature);
-    Serial.println(" °C");
-    Serial.print("Umidità: ");
-    Serial.print(humidity);
-    Serial.println(" %");
-  */
 
   // Formatta i valori float in una stringa
   String bufferTemp;
@@ -506,7 +541,7 @@ void loop()
   }
 
   static unsigned long lastUpdateDisplay = 0;
-  if (millis() > lastUpdateDisplay + scrollingSpeed)
+  if ((millis() > lastUpdateDisplay + scrollingSpeed) && (newsList.getSize() > 0))
   {
     lastUpdateDisplay = millis();
     String notizia = newsList.get(indiceNotizia);
@@ -524,8 +559,8 @@ void loop()
     int limiteNegativo = 0 - ((notizia.length()) * 6);
     if (textX < limiteNegativo)
     {
-      //Serial.print("Visualizzo la notizia numero ");
-      //Serial.println(indiceNotizia);
+      // Serial.print("Visualizzo la notizia numero ");
+      // Serial.println(indiceNotizia);
       textX = PANEL_RES_X;
       indiceNotizia++;
       indiceNotizia = indiceNotizia % newsList.getSize();
@@ -549,7 +584,7 @@ void loop()
     brightness = constrain(brightness, brightnessMin, brightnessMax);
     dma_display->setBrightness8(brightness); // 0-255
 
-    //syncRTCwithNTP();
+    // syncRTCwithNTP();
   }
 
   // Alterno la visualizzazione del giorno della settimana e della data odierna
