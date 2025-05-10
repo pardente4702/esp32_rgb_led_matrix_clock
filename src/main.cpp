@@ -138,18 +138,24 @@ void syncRTCwithNTP()
   }
 }
 
+// Funzione per rimuovere gli accenti dalle lettere
 void rimuoviAccenti(char* cdataBuffer) {
     for (int i = 0; cdataBuffer[i] != '\0'; ++i) {
         unsigned char c = (unsigned char)cdataBuffer[i];
         if (c == 0xC3) { // In UTF-8, accenti iniziano con 0xC3
             unsigned char next = (unsigned char)cdataBuffer[i + 1];
             switch (next) {
-                case 0xA0: cdataBuffer[i] = '\''; cdataBuffer[i + 1] = 'a'; break; // à
-                case 0xA8: cdataBuffer[i] = '\''; cdataBuffer[i + 1] = 'e'; break; // è
-                case 0xA9: cdataBuffer[i] = '\''; cdataBuffer[i + 1] = 'e'; break; // é
-                case 0xAC: cdataBuffer[i] = '\''; cdataBuffer[i + 1] = 'i'; break; // ì
-                case 0xB2: cdataBuffer[i] = '\''; cdataBuffer[i + 1] = 'o'; break; // ò
-                case 0xB9: cdataBuffer[i] = '\''; cdataBuffer[i + 1] = 'u'; break; // ù
+                case 0xA0: cdataBuffer[i] = 'a'; cdataBuffer[i + 1] = '\''; break; // à
+                case 0xA8: cdataBuffer[i] = 'e'; cdataBuffer[i + 1] = '\''; break; // è
+                case 0xA9: cdataBuffer[i] = 'e'; cdataBuffer[i + 1] = '\''; break; // é
+                case 0xAC: cdataBuffer[i] = 'i'; cdataBuffer[i + 1] = '\''; break; // ì
+                case 0xB2: cdataBuffer[i] = 'o'; cdataBuffer[i + 1] = '\''; break; // ò
+                case 0xB9: cdataBuffer[i] = 'u'; cdataBuffer[i + 1] = '\''; break; // ù
+                case 0x80: cdataBuffer[i] = 'A'; cdataBuffer[i + 1] = '\''; break; // À
+                case 0x88: cdataBuffer[i] = 'E'; cdataBuffer[i + 1] = '\''; break; // È
+                case 0x8C: cdataBuffer[i] = 'I'; cdataBuffer[i + 1] = '\''; break; // Ì
+                case 0x92: cdataBuffer[i] = 'O'; cdataBuffer[i + 1] = '\''; break; // Ò
+                case 0x99: cdataBuffer[i] = 'U'; cdataBuffer[i + 1] = '\''; break; // Ù
                 default: break;
             }
         }
