@@ -53,7 +53,7 @@ const int BUZZER_PIN = 18; // Pin del buzzer collegato all'ESP32
 char daysOfTheWeek[7][12] = {"Domenica", "Lunedi'", "Martedi'", "Mercoledi'", "Giovedi'", "Venerdi'", "Sabato"};
 const char *months[] = {"Gen", "Feb", "Mar", "Apr", "Mag", "Giu", "Lug", "Ago", "Set", "Ott", "Nov", "Dic"};
 
-uint32_t tempBrightnessUpdateInterval = 30000;
+uint32_t tempBrightnessUpdateInterval = 15000; // 15 secondi
 uint32_t scrollingSpeed = 15;
 
 volatile bool hourInterrupt = false;
@@ -62,12 +62,11 @@ volatile bool hourInterrupt = false;
 const int brightnessMin = 30;  // minimo di notte
 const int brightnessMax = 220; // massimo di giorno
 
-uint32_t newsUpdateInterval = 300000; // 5 minuti
+uint32_t newsUpdateInterval = 900000; // 15 minuti
 
 int brightness = brightnessMax;
 
 const char *rss_feed_url = "https://www.ansa.it/lazio/notizie/lazio_rss.xml";
-// const char *rss_feed_url = "https://www.ansa.it/sito/notizie/cronaca/cronaca_rss.xml";
 
 uint8_t indiceNotizia = 0;
 
@@ -139,74 +138,22 @@ void syncRTCwithNTP()
   }
 }
 
-char *convertiAccentate(const char *input)
-{
-  static char output[256]; // buffer di output (modifica se ti serve più spazio)
-  int j = 0;
-
-  for (int i = 0; input[i] != '\0'; i++)
-  {
-    char c = input[i];
-
-    // Mappa base (aggiungine altri se vuoi)
-    switch ((unsigned char)c)
-    {
-    case 0xC3: // In UTF-8 le lettere accentate usano due byte, inizia con 0xC3
-      i++;     // guarda il secondo byte
-      switch ((unsigned char)input[i])
-      {
-      case 0xA0:
-        output[j++] = 'a';
-        output[j++] = '\'';
-        break; // à
-      case 0xA8:
-        output[j++] = 'e';
-        output[j++] = '\'';
-        break; // è
-      case 0xAC:
-        output[j++] = 'i';
-        output[j++] = '\'';
-        break; // ì
-      case 0xB2:
-        output[j++] = 'o';
-        output[j++] = '\'';
-        break; // ò
-      case 0xB9:
-        output[j++] = 'u';
-        output[j++] = '\'';
-        break; // ù
-      case 0x80:
-        output[j++] = 'A';
-        output[j++] = '\'';
-        break; // À
-      case 0x88:
-        output[j++] = 'E';
-        output[j++] = '\'';
-        break; // È
-      case 0x8C:
-        output[j++] = 'I';
-        output[j++] = '\'';
-        break; // Ì
-      case 0x92:
-        output[j++] = 'O';
-        output[j++] = '\'';
-        break; // Ò
-      case 0x99:
-        output[j++] = 'U';
-        output[j++] = '\'';
-        break; // Ù
-      default:
-        break; // ignora altri
-      }
-      break;
-
-    default:
-      output[j++] = c;
+void rimuoviAccenti(char* cdataBuffer) {
+    for (int i = 0; cdataBuffer[i] != '\0'; ++i) {
+        unsigned char c = (unsigned char)cdataBuffer[i];
+        if (c == 0xC3) { // In UTF-8, accenti iniziano con 0xC3
+            unsigned char next = (unsigned char)cdataBuffer[i + 1];
+            switch (next) {
+                case 0xA0: cdataBuffer[i] = '\''; cdataBuffer[i + 1] = 'a'; break; // à
+                case 0xA8: cdataBuffer[i] = '\''; cdataBuffer[i + 1] = 'e'; break; // è
+                case 0xA9: cdataBuffer[i] = '\''; cdataBuffer[i + 1] = 'e'; break; // é
+                case 0xAC: cdataBuffer[i] = '\''; cdataBuffer[i + 1] = 'i'; break; // ì
+                case 0xB2: cdataBuffer[i] = '\''; cdataBuffer[i + 1] = 'o'; break; // ò
+                case 0xB9: cdataBuffer[i] = '\''; cdataBuffer[i + 1] = 'u'; break; // ù
+                default: break;
+            }
+        }
     }
-  }
-
-  output[j] = '\0'; // termina la stringa
-  return output;
 }
 
 void XMLCALL startElement(void *userData, const char *name, const char **atts)
@@ -234,6 +181,7 @@ void XMLCALL endElement(void *userData, const char *name)
     insideTitle = false;
     Serial.print("Titolo: ");
     Serial.println(cdataBuffer);
+    rimuoviAccenti(cdataBuffer); // Converti le lettere accentate
     newsList.add(cdataBuffer); // Aggiungi il titolo alla lista delle notizie
   }
 }
@@ -576,8 +524,8 @@ void loop()
     visualizzaTemperaturaUmidita();
 
     int ldrValue = analogRead(LDR_PIN); // Legge il valore analogico dal sensore LDR
-    Serial.print("LDR value: ");
-    Serial.println(ldrValue); // Stampa il valore letto nel monitor seriale
+    //Serial.print("LDR value: ");
+    //Serial.println(ldrValue); // Stampa il valore letto nel monitor seriale
 
     // Adatta questi range in base al tuo ambiente reale
     brightness = map(ldrValue, 4000, 100, brightnessMin, brightnessMax);
@@ -591,7 +539,7 @@ void loop()
   static unsigned long Last_UPDATE_DataGiorno = 0;
   if (dataGiornoState == DATA)
   {
-    if (millis() > Last_UPDATE_DataGiorno + 10000)
+    if (millis() > Last_UPDATE_DataGiorno + 5000)
     {
       int leftSpace = centraStringa((String)daysOfTheWeek[now.dayOfTheWeek()]);
       dma_display->fillRect(0, 8, PANEL_RES_X, 8, 0);
@@ -606,7 +554,7 @@ void loop()
   }
   else
   {
-    if (millis() > Last_UPDATE_DataGiorno + 10000)
+    if (millis() > Last_UPDATE_DataGiorno + 5000)
     {
       int leftSpace = centraStringa("XXXXXXXXX");
       dma_display->fillRect(0, 8, PANEL_RES_X, 8, 0);
