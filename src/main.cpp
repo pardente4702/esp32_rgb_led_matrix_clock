@@ -202,36 +202,9 @@ void XMLCALL characterData(void *userData, const char *s, int len)
   }
 }
 
-/*
-void parseXML(const String &xmlData)
-{
-  // Crea il parser Expat
-  XML_Parser parser = XML_ParserCreate(NULL);
-  if (!parser)
-  {
-    Serial.println("Errore nella creazione del parser Expat!");
-    return;
-  }
-
-  // Imposta i callback
-  XML_SetElementHandler(parser, startElement, endElement);
-  XML_SetCharacterDataHandler(parser, characterData);
-
-  // Passa i dati XML al parser
-  if (XML_Parse(parser, xmlData.c_str(), xmlData.length(), true) == XML_STATUS_ERROR)
-  {
-    Serial.print("Errore nel parsing XML: ");
-    Serial.println(XML_ErrorString(XML_GetErrorCode(parser)));
-  }
-
-  // Libera il parser
-  XML_ParserFree(parser);
-}
-  */
 
 void fetchRSSFeed()
 {
-  // Serial.println("sono qui");
   if (WiFi.status() == WL_CONNECTED)
   {
     HTTPClient http;
@@ -272,28 +245,6 @@ void soundBuzzer()
   digitalWrite(BUZZER_PIN, HIGH); // Accende il buzzer
   delay(500);                     // Suona per 1 secondo
   digitalWrite(BUZZER_PIN, LOW);  // Spegne il buzzer
-}
-
-void printCurrentTime()
-{
-  // Get the current time from the RTC
-  DateTime now = rtc.now();
-
-  // Getting each time field in individual variables
-  // And adding a leading zero when needed;
-  String yearStr = String(now.year(), DEC);
-  String monthStr = (now.month() < 10 ? "0" : "") + String(now.month(), DEC);
-  String dayStr = (now.day() < 10 ? "0" : "") + String(now.day(), DEC);
-  String hourStr = (now.hour() < 10 ? "0" : "") + String(now.hour(), DEC);
-  String minuteStr = (now.minute() < 10 ? "0" : "") + String(now.minute(), DEC);
-  String secondStr = (now.second() < 10 ? "0" : "") + String(now.second(), DEC);
-  String dayOfWeek = daysOfTheWeek[now.dayOfTheWeek()];
-
-  // Complete time string
-  String formattedTime = dayOfWeek + ", " + yearStr + "-" + monthStr + "-" + dayStr + " " + hourStr + ":" + minuteStr + ":" + secondStr;
-
-  // Print the complete formatted time
-  Serial.println(formattedTime);
 }
 
 String readTemperatureAndHumidity()
@@ -343,7 +294,6 @@ void IRAM_ATTR handleInterrupt()
 
 void setup()
 {
-
   Serial.begin(115200);
   esp_reset_reason_t reason = esp_reset_reason();
   Serial.print("Reset reason: ");
@@ -455,8 +405,6 @@ void setup()
   dma_display->setBrightness8(brightness); // 0-255
   dma_display->clearScreen();
   dma_display->fillScreen(myBLACK);
-
-  // delay(5000);
 
   fetchRSSFeed();
 
