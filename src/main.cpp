@@ -5,7 +5,6 @@
 #include "WifiCredentials.h"
 #include <time.h>
 #include <HTTPClient.h>
-#include <tinyxml2.h>
 #include <List.hpp>
 #include <expat.h>
 
