@@ -7,6 +7,11 @@
 #include <HTTPClient.h>
 #include <List.hpp>
 #include <expat.h>
+#include <Espalexa.h>
+
+Espalexa espalexa;
+
+boolean orologioAttivo = true; // Variabile per controllare se l'orologio è attivo
 
 #define R1_PIN 25
 #define G1_PIN 26
@@ -138,27 +143,65 @@ void syncRTCwithNTP()
 }
 
 // Funzione per rimuovere gli accenti dalle lettere
-void rimuoviAccenti(char* cdataBuffer) {
-    for (int i = 0; cdataBuffer[i] != '\0'; ++i) {
-        unsigned char c = (unsigned char)cdataBuffer[i];
-        if (c == 0xC3) { // In UTF-8, accenti iniziano con 0xC3
-            unsigned char next = (unsigned char)cdataBuffer[i + 1];
-            switch (next) {
-                case 0xA0: cdataBuffer[i] = 'a'; cdataBuffer[i + 1] = '\''; break; // à
-                case 0xA8: cdataBuffer[i] = 'e'; cdataBuffer[i + 1] = '\''; break; // è
-                case 0xA9: cdataBuffer[i] = 'e'; cdataBuffer[i + 1] = '\''; break; // é
-                case 0xAC: cdataBuffer[i] = 'i'; cdataBuffer[i + 1] = '\''; break; // ì
-                case 0xB2: cdataBuffer[i] = 'o'; cdataBuffer[i + 1] = '\''; break; // ò
-                case 0xB9: cdataBuffer[i] = 'u'; cdataBuffer[i + 1] = '\''; break; // ù
-                case 0x80: cdataBuffer[i] = 'A'; cdataBuffer[i + 1] = '\''; break; // À
-                case 0x88: cdataBuffer[i] = 'E'; cdataBuffer[i + 1] = '\''; break; // È
-                case 0x8C: cdataBuffer[i] = 'I'; cdataBuffer[i + 1] = '\''; break; // Ì
-                case 0x92: cdataBuffer[i] = 'O'; cdataBuffer[i + 1] = '\''; break; // Ò
-                case 0x99: cdataBuffer[i] = 'U'; cdataBuffer[i + 1] = '\''; break; // Ù
-                default: break;
-            }
-        }
+void rimuoviAccenti(char *cdataBuffer)
+{
+  for (int i = 0; cdataBuffer[i] != '\0'; ++i)
+  {
+    unsigned char c = (unsigned char)cdataBuffer[i];
+    if (c == 0xC3)
+    { // In UTF-8, accenti iniziano con 0xC3
+      unsigned char next = (unsigned char)cdataBuffer[i + 1];
+      switch (next)
+      {
+      case 0xA0:
+        cdataBuffer[i] = 'a';
+        cdataBuffer[i + 1] = '\'';
+        break; // à
+      case 0xA8:
+        cdataBuffer[i] = 'e';
+        cdataBuffer[i + 1] = '\'';
+        break; // è
+      case 0xA9:
+        cdataBuffer[i] = 'e';
+        cdataBuffer[i + 1] = '\'';
+        break; // é
+      case 0xAC:
+        cdataBuffer[i] = 'i';
+        cdataBuffer[i + 1] = '\'';
+        break; // ì
+      case 0xB2:
+        cdataBuffer[i] = 'o';
+        cdataBuffer[i + 1] = '\'';
+        break; // ò
+      case 0xB9:
+        cdataBuffer[i] = 'u';
+        cdataBuffer[i + 1] = '\'';
+        break; // ù
+      case 0x80:
+        cdataBuffer[i] = 'A';
+        cdataBuffer[i + 1] = '\'';
+        break; // À
+      case 0x88:
+        cdataBuffer[i] = 'E';
+        cdataBuffer[i + 1] = '\'';
+        break; // È
+      case 0x8C:
+        cdataBuffer[i] = 'I';
+        cdataBuffer[i + 1] = '\'';
+        break; // Ì
+      case 0x92:
+        cdataBuffer[i] = 'O';
+        cdataBuffer[i + 1] = '\'';
+        break; // Ò
+      case 0x99:
+        cdataBuffer[i] = 'U';
+        cdataBuffer[i + 1] = '\'';
+        break; // Ù
+      default:
+        break;
+      }
     }
+  }
 }
 
 void XMLCALL startElement(void *userData, const char *name, const char **atts)
@@ -187,7 +230,7 @@ void XMLCALL endElement(void *userData, const char *name)
     Serial.print("Titolo: ");
     Serial.println(cdataBuffer);
     rimuoviAccenti(cdataBuffer); // Converti le lettere accentate
-    newsList.add(cdataBuffer); // Aggiungi il titolo alla lista delle notizie
+    newsList.add(cdataBuffer);   // Aggiungi il titolo alla lista delle notizie
   }
 }
 
@@ -200,7 +243,6 @@ void XMLCALL characterData(void *userData, const char *s, int len)
     cdataBuffer[cdataPos] = '\0';
   }
 }
-
 
 void fetchRSSFeed()
 {
@@ -291,6 +333,23 @@ void IRAM_ATTR handleInterrupt()
   hourInterrupt = true; // Imposta un flag quando si verifica l'interrupt
 }
 
+void clockChanged(uint8_t lum)
+{
+  Serial.print("l: ");
+  Serial.println(lum);
+
+  if (lum)
+  {
+    Serial.println("Clock acceso");
+    orologioAttivo = true; // Attiva l'orologio
+  }
+  else
+  {
+    Serial.println("Clock spento");
+    orologioAttivo = false; // Disattiva l'orologio
+  }
+}
+
 void setup()
 {
   Serial.begin(115200);
@@ -343,8 +402,19 @@ void setup()
       n = 0;
     }
   }
-  Serial.println("\nConnected to WiFi");
-  Serial.print("\n");
+
+  if (WiFi.status() == WL_CONNECTED)
+  {
+    Serial.println("\nConnected to WiFi");
+    Serial.print("IP Address: ");
+    Serial.println(WiFi.localIP());
+    espalexa.addDevice("esp32 Clock", clockChanged);
+    espalexa.begin();
+  }
+  else
+  {
+    Serial.println("\nNot connected to WiFi");
+  }
 
   // Imposta il fuso orario italiano con ora legale
   configTzTime("CET-1CEST,M3.5.0/2,M10.5.0/3", "pool.ntp.org");
@@ -410,8 +480,9 @@ void setup()
   visualizzaTemperaturaUmidita();
 }
 
-void loop()
+void gestisciOrologio()
 {
+
   DateTime now = rtc.now();
   String hours = (now.hour() < 10 ? "0" : "") + String(now.hour(), DEC);
   String minutes = (now.minute() < 10 ? "0" : "") + String(now.minute(), DEC);
@@ -477,8 +548,8 @@ void loop()
     visualizzaTemperaturaUmidita();
 
     int ldrValue = analogRead(LDR_PIN); // Legge il valore analogico dal sensore LDR
-    //Serial.print("LDR value: ");
-    //Serial.println(ldrValue); // Stampa il valore letto nel monitor seriale
+    // Serial.print("LDR value: ");
+    // Serial.println(ldrValue); // Stampa il valore letto nel monitor seriale
 
     // Adatta questi range in base al tuo ambiente reale
     brightness = map(ldrValue, 4000, 100, brightnessMin, brightnessMax);
@@ -539,6 +610,28 @@ void loop()
     { // Controlla se è l'inizio di una nuova ora
       // Serial.println("Nuova ora! Suona il buzzer.");
       soundBuzzer();
+    }
+  }
+}
+
+void loop()
+{
+  espalexa.loop(); // Gestisce le richieste di Espalexa
+  delay(1);        // Piccola pausa per evitare blocchi
+  static boolean nextState = true;
+
+  if (orologioAttivo)
+  {
+    gestisciOrologio();
+    nextState = false;
+  }
+  else
+  {
+    // Se l'orologio non è attivo, non fare nulla
+    if (nextState == false)
+    {
+      dma_display->fillScreen(myBLACK); // Pulisce lo schermo
+      nextState = true;
     }
   }
 }
