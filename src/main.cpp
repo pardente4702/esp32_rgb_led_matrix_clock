@@ -254,7 +254,11 @@ void fetchRSSFeed()
 
     if (httpCode > 0)
     {
-      newsList.removeAll(); // Pulisce la lista delle notizie
+      newsList.removeAll(); // Cancella la lista delle notizie
+      indiceNotizia = 0; // Resetta l'indice della notizia
+      textX = PANEL_RES_X; // Resetta la posizione del testo
+      dma_display->fillRect(0, 24, PANEL_RES_X, 8, 0); // Cancella solo la riga del testo scorrevole
+
       WiFiClient *stream = http.getStreamPtr();
       XML_Parser parser = XML_ParserCreate(NULL);
       XML_SetElementHandler(parser, startElement, endElement);
