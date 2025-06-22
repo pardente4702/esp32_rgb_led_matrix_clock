@@ -244,8 +244,21 @@ void XMLCALL characterData(void *userData, const char *s, int len)
   }
 }
 
+void stampaOra()
+{
+  DateTime now = rtc.now();
+  Serial.print("Ora: ");
+  Serial.print((now.hour() < 10 ? "0" : "") + String(now.hour(), DEC));
+  Serial.print(":");
+  Serial.print((now.minute() < 10 ? "0" : "") + String(now.minute(), DEC));
+  Serial.print(":");
+  Serial.println((now.second() < 10 ? "0" : "") + String(now.second(), DEC));
+}
+
 void fetchRSSFeed()
 {
+
+  Serial.println("Fetching RSS feed...");
   if (WiFi.status() == WL_CONNECTED)
   {
     HTTPClient http;
@@ -254,6 +267,7 @@ void fetchRSSFeed()
 
     if (httpCode > 0)
     {
+      stampaOra(); // Stampa l'ora corrente
       newsList.removeAll(); // Cancella la lista delle notizie
       indiceNotizia = 0; // Resetta l'indice della notizia
       textX = PANEL_RES_X; // Resetta la posizione del testo
