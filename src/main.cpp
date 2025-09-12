@@ -1,13 +1,15 @@
 #include <ESP32-HUB75-MatrixPanel-I2S-DMA.h>
 #include <WiFi.h>
 #include <RTClib.h>
-#include <SHT21.h>
+//#include <SHT21.h>
 #include "WifiCredentials.h"
 #include <time.h>
 #include <HTTPClient.h>
 #include <List.hpp>
 #include <expat.h>
 #include <Espalexa.h>
+#include <Wire.h>
+#include "Adafruit_HTU21DF.h"
 
 Espalexa espalexa;
 
@@ -48,7 +50,10 @@ char scrollingText[256] = {0};
 int textX = PANEL_RES_X;
 
 RTC_DS3231 rtc;
-SHT21 sht;
+//SHT21 sht;
+
+// Crea un'istanza del sensore
+Adafruit_HTU21DF htu = Adafruit_HTU21DF();
 
 const int LDR_PIN = 34;    // Pin analogico a cui è collegato il sensore LDR
 const int SQW_PIN = 19;    // Pin SQW collegato all'ESP32
@@ -310,8 +315,8 @@ String readTemperatureAndHumidity()
 {
   static u_int8_t count = 0;
 
-  float temperature = sht.getTemperature(); // Legge la temperatura
-  float humidity = sht.getHumidity();       // Legge l'umidità
+  float temperature = htu.readTemperature(); // Legge la temperatura
+  float humidity = htu.readHumidity();       // Legge l'umidità
 
   // Controlla se ci sono errori nella lettura
   if (isnan(temperature) || isnan(humidity))
@@ -426,13 +431,24 @@ void setup()
     Serial.println("\nConnected to WiFi");
     Serial.print("IP Address: ");
     Serial.println(WiFi.localIP());
-    espalexa.addDevice("esp32 Clock", clockChanged);
+    espalexa.addDevice("Orologio", clockChanged);
     espalexa.begin();
   }
   else
   {
     Serial.println("\nNot connected to WiFi");
   }
+
+  // Inizializza I2C (puoi cambiare i pin se necessario)
+  Wire.begin(21, 22);  // SDA = 21, SCL = 22
+
+  // Inizializza il sensore
+  if (!htu.begin()) {
+    Serial.println("Errore: HTU21D non trovato!");
+    while (1);
+  }
+
+  Serial.println("HTU21D inizializzato correttamente");
 
   // Imposta il fuso orario italiano con ora legale
   configTzTime("CET-1CEST,M3.5.0/2,M10.5.0/3", "pool.ntp.org");
@@ -634,7 +650,7 @@ void gestisciOrologio()
 
 void loop()
 {
-  espalexa.loop(); // Gestisce le richieste di Espalexa
+  espalexa.loop();
   delay(1);        // Piccola pausa per evitare blocchi
   static boolean nextState = true;
 
