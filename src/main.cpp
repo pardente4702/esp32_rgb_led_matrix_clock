@@ -7,6 +7,7 @@
 #include <HTTPClient.h>
 #include <List.hpp>
 #include <expat.h>
+// #define ESPALEXA_DEBUG
 #include <Espalexa.h>
 #include <Wire.h>
 #include "Adafruit_HTU21DF.h"
@@ -432,7 +433,15 @@ void setup()
     Serial.print("IP Address: ");
     Serial.println(WiFi.localIP());
     espalexa.addDevice("Orologio", clockChanged);
-    espalexa.begin();
+    if (espalexa.begin())
+    {
+      Serial.println("Espalexa started");
+    }
+    else
+    {
+      Serial.println("Espalexa failed to start");
+    }
+    //delay(2000); // Attendi 2 secondi per stabilizzare la connessione
   }
   else
   {
