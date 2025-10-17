@@ -1,7 +1,7 @@
 #include <ESP32-HUB75-MatrixPanel-I2S-DMA.h>
 #include <WiFi.h>
 #include <RTClib.h>
-//#include <SHT21.h>
+// #include <SHT21.h>
 #include "WifiCredentials.h"
 #include <time.h>
 #include <HTTPClient.h>
@@ -51,7 +51,7 @@ char scrollingText[256] = {0};
 int textX = PANEL_RES_X;
 
 RTC_DS3231 rtc;
-//SHT21 sht;
+// SHT21 sht;
 
 // Crea un'istanza del sensore
 Adafruit_HTU21DF htu = Adafruit_HTU21DF();
@@ -76,7 +76,8 @@ uint32_t newsUpdateInterval = 900000; // 15 minuti
 
 int brightness = brightnessMax;
 
-const char *rss_feed_url = "https://www.ansa.it/lazio/notizie/lazio_rss.xml";
+//const char *rss_feed_url = "https://www.ansa.it/lazio/notizie/lazio_rss.xml";
+const char *rss_feed_url = "https://www.repubblica.it/rss/homepage/rss2.0.xml?ref=RHFT";
 
 uint8_t indiceNotizia = 0;
 
@@ -84,6 +85,7 @@ List<String> newsList;
 
 String currentTitle = "";
 
+// #define BUFFER_SIZE 512
 #define BUFFER_SIZE 512
 
 char cdataBuffer[BUFFER_SIZE];
@@ -207,6 +209,20 @@ void rimuoviAccenti(char *cdataBuffer)
         break;
       }
     }
+    // Gestione virgolette tipografiche “ e ”
+    else if (c == 0xE2)
+    {
+      unsigned char next1 = (unsigned char)cdataBuffer[i + 1];
+      unsigned char next2 = (unsigned char)cdataBuffer[i + 2];
+
+      // “ (E2 80 9C) oppure ” (E2 80 9D)
+      if (next1 == 0x80 && (next2 == 0x9C || next2 == 0x9D))
+      {
+        cdataBuffer[i] = '\'';
+        // Rimuovi i due byte successivi spostando la stringa a sinistra
+        memmove(&cdataBuffer[i + 1], &cdataBuffer[i + 3], strlen(&cdataBuffer[i + 3]) + 1);
+      }
+    }
   }
 }
 
@@ -273,14 +289,14 @@ void fetchRSSFeed()
 
     if (httpCode > 0)
     {
-      stampaOra(); // Stampa l'ora corrente
-      newsList.removeAll(); // Cancella la lista delle notizie
-      indiceNotizia = 0; // Resetta l'indice della notizia
-      textX = PANEL_RES_X; // Resetta la posizione del testo
+      stampaOra();                                     // Stampa l'ora corrente
+      newsList.removeAll();                            // Cancella la lista delle notizie
+      indiceNotizia = 0;                               // Resetta l'indice della notizia
+      textX = PANEL_RES_X;                             // Resetta la posizione del testo
       dma_display->fillRect(0, 24, PANEL_RES_X, 8, 0); // Cancella solo la riga del testo scorrevole
 
       WiFiClient *stream = http.getStreamPtr();
-      XML_Parser parser = XML_ParserCreate(NULL);
+      XML_Parser parser = XML_ParserCreate("UTF-8");
       XML_SetElementHandler(parser, startElement, endElement);
       XML_SetCharacterDataHandler(parser, characterData);
 
@@ -288,17 +304,29 @@ void fetchRSSFeed()
       while (stream->connected() && stream->available())
       {
         size_t len = stream->readBytes(buffer, sizeof(buffer));
-        if (!XML_Parse(parser, buffer, len, len == 0))
+        
+        //Serial.println("quello che leggo");
+        //Serial.println(buffer);
+        if (!XML_Parse(parser, buffer, len, false))
         {
           Serial.printf("Errore nel parsing XML: %s\n", XML_ErrorString(XML_GetErrorCode(parser)));
+          Serial.printf("Errore nel parsing XML alla riga %lu, colonna %lu: %s\n",
+                        XML_GetCurrentLineNumber(parser),
+                        XML_GetCurrentColumnNumber(parser),
+                        XML_ErrorString(XML_GetErrorCode(parser)));
           break;
         }
       }
+
+      // Segnala la fine del documento
+      XML_Parse(parser, nullptr, 0, true);
+
       XML_ParserFree(parser);
     }
     else
     {
-      Serial.println("Error on HTTP request.");
+      // Serial.println("Error on HTTP request.");
+      Serial.printf("Errore HTTP (%d): impossibile scaricare il feed.", httpCode);
     }
 
     http.end();
@@ -441,7 +469,7 @@ void setup()
     {
       Serial.println("Espalexa failed to start");
     }
-    //delay(2000); // Attendi 2 secondi per stabilizzare la connessione
+    // delay(2000); // Attendi 2 secondi per stabilizzare la connessione
   }
   else
   {
@@ -449,12 +477,14 @@ void setup()
   }
 
   // Inizializza I2C (puoi cambiare i pin se necessario)
-  Wire.begin(21, 22);  // SDA = 21, SCL = 22
+  Wire.begin(21, 22); // SDA = 21, SCL = 22
 
   // Inizializza il sensore
-  if (!htu.begin()) {
+  if (!htu.begin())
+  {
     Serial.println("Errore: HTU21D non trovato!");
-    while (1);
+    while (1)
+      ;
   }
 
   Serial.println("HTU21D inizializzato correttamente");
@@ -660,7 +690,7 @@ void gestisciOrologio()
 void loop()
 {
   espalexa.loop();
-  delay(1);        // Piccola pausa per evitare blocchi
+  delay(1); // Piccola pausa per evitare blocchi
   static boolean nextState = true;
 
   if (orologioAttivo)
