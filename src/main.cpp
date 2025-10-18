@@ -72,11 +72,11 @@ volatile bool hourInterrupt = false;
 const int brightnessMin = 30;  // minimo di notte
 const int brightnessMax = 220; // massimo di giorno
 
-uint32_t newsUpdateInterval = 900000; // 15 minuti
+uint32_t newsUpdateInterval = 600000; // 10 minuti
 
 int brightness = brightnessMax;
 
-//const char *rss_feed_url = "https://www.ansa.it/lazio/notizie/lazio_rss.xml";
+// const char *rss_feed_url = "https://www.ansa.it/lazio/notizie/lazio_rss.xml";
 const char *rss_feed_url = "https://www.repubblica.it/rss/homepage/rss2.0.xml?ref=RHFT";
 
 uint8_t indiceNotizia = 0;
@@ -218,8 +218,14 @@ void rimuoviAccenti(char *cdataBuffer)
       // “ (E2 80 9C) oppure ” (E2 80 9D)
       if (next1 == 0x80 && (next2 == 0x9C || next2 == 0x9D))
       {
-        cdataBuffer[i] = '\'';
+        cdataBuffer[i] = '"';
         // Rimuovi i due byte successivi spostando la stringa a sinistra
+        memmove(&cdataBuffer[i + 1], &cdataBuffer[i + 3], strlen(&cdataBuffer[i + 3]) + 1);
+      }
+      // ’ (apostrofo tipografico, E2 80 99)
+      else if (next1 == 0x80 && next2 == 0x99)
+      {
+        cdataBuffer[i] = '\'';
         memmove(&cdataBuffer[i + 1], &cdataBuffer[i + 3], strlen(&cdataBuffer[i + 3]) + 1);
       }
     }
@@ -301,12 +307,16 @@ void fetchRSSFeed()
       XML_SetCharacterDataHandler(parser, characterData);
 
       char buffer[BUFFER_SIZE];
+
+      boolean xmlParsingInError = false;
       while (stream->connected() && stream->available())
       {
         size_t len = stream->readBytes(buffer, sizeof(buffer));
-        
-        //Serial.println("quello che leggo");
-        //Serial.println(buffer);
+
+        delay(100);
+
+        // Serial.println("quello che leggo");
+        // Serial.println(buffer);
         if (!XML_Parse(parser, buffer, len, false))
         {
           Serial.printf("Errore nel parsing XML: %s\n", XML_ErrorString(XML_GetErrorCode(parser)));
@@ -314,8 +324,15 @@ void fetchRSSFeed()
                         XML_GetCurrentLineNumber(parser),
                         XML_GetCurrentColumnNumber(parser),
                         XML_ErrorString(XML_GetErrorCode(parser)));
+          xmlParsingInError = true;
           break;
         }
+      }
+
+      if (xmlParsingInError) {
+        newsUpdateInterval = 300000;
+      } else {
+        newsUpdateInterval = 600000;
       }
 
       // Segnala la fine del documento
