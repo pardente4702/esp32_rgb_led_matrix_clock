@@ -6,16 +6,26 @@
 #include <time.h>
 #include <HTTPClient.h>
 #include <List.hpp>
-#include <expat.h>
 // #define ESPALEXA_DEBUG
 #include <Espalexa.h>
 #include <Wire.h>
 #include "Adafruit_HTU21DF.h"
+#include <SD.h>
+#include <SPI.h>
+#include <TinyXML2.h>
+using namespace tinyxml2;
 
 Espalexa espalexa;
 
 boolean orologioAttivo = true; // Variabile per controllare se l'orologio è attivo
 
+// Definizioni pin per modulo scheda microSD
+#define SD_CS 33
+#define MOSI 23
+#define MISO 19
+#define SCK 18
+
+// Definizioni pin per matrice LED HUB75
 #define R1_PIN 25
 #define G1_PIN 26
 #define B1_PIN 27
@@ -56,9 +66,9 @@ RTC_DS3231 rtc;
 // Crea un'istanza del sensore
 Adafruit_HTU21DF htu = Adafruit_HTU21DF();
 
-const int LDR_PIN = 34;    // Pin analogico a cui è collegato il sensore LDR
-const int SQW_PIN = 19;    // Pin SQW collegato all'ESP32
-const int BUZZER_PIN = 18; // Pin del buzzer collegato all'ESP32
+const int LDR_PIN = 34; // Pin analogico a cui è collegato il sensore LDR
+// const int SQW_PIN = 19;    // Pin SQW collegato all'ESP32
+// const int BUZZER_PIN = 18; // Pin del buzzer collegato all'ESP32
 
 char daysOfTheWeek[7][12] = {"Domenica", "Lunedi'", "Martedi'", "Mercoledi'", "Giovedi'", "Venerdi'", "Sabato"};
 const char *months[] = {"Gen", "Feb", "Mar", "Apr", "Mag", "Giu", "Lug", "Ago", "Set", "Ott", "Nov", "Dic"};
@@ -66,32 +76,30 @@ const char *months[] = {"Gen", "Feb", "Mar", "Apr", "Mag", "Giu", "Lug", "Ago", 
 uint32_t tempBrightnessUpdateInterval = 15000; // 15 secondi
 uint32_t scrollingSpeed = 15;
 
-volatile bool hourInterrupt = false;
+// volatile bool hourInterrupt = false;
 
 // Imposta la luminosità minima e massima
 const int brightnessMin = 30;  // minimo di notte
 const int brightnessMax = 220; // massimo di giorno
 
-uint32_t newsUpdateInterval = 600000; // 10 minuti
+uint32_t newsUpdateInterval = 600000;  // 10 minuti
+uint32_t timeUpdateInterval = 3600000; // 1 ora
 
 int brightness = brightnessMax;
 
-// const char *rss_feed_url = "https://www.ansa.it/lazio/notizie/lazio_rss.xml";
-const char *rss_feed_url = "https://www.repubblica.it/rss/homepage/rss2.0.xml?ref=RHFT";
+const char *rss_feed_url = "https://www.ansa.it/lazio/notizie/lazio_rss.xml";
 
 uint8_t indiceNotizia = 0;
 
 List<String> newsList;
 
-String currentTitle = "";
-
 // #define BUFFER_SIZE 512
-#define BUFFER_SIZE 512
+// #define BUFFER_SIZE 512
+// char cdataBuffer[BUFFER_SIZE];
 
-char cdataBuffer[BUFFER_SIZE];
-size_t cdataPos = 0;
-bool insideItem = false;
-bool insideTitle = false;
+// size_t cdataPos = 0;
+// bool insideItem = false;
+// bool insideTitle = false;
 
 enum DataGiornoState
 {
@@ -100,53 +108,124 @@ enum DataGiornoState
 }; // Stati possibili
 DataGiornoState dataGiornoState = DATA; // Stato iniziale
 
-String leftPad(int number, int totalLength)
+// Funzione per scaricare il feed RSS e salvarlo su SD
+void scaricaFeed(String url, const char *path)
 {
-  // Convertiamo il numero in stringa
-  String str = String(number);
+  HTTPClient http;
+  http.begin(url);
+  int httpCode = http.GET();
 
-  // Calcoliamo quanto padding è necessario
-  int paddingNeeded = totalLength - str.length();
-
-  // Aggiungiamo zeri a sinistra
-  for (int i = 0; i < paddingNeeded; i++)
+  if (httpCode != HTTP_CODE_OK)
   {
-    str = "0" + str; // Aggiungiamo uno zero a sinistra
+    Serial.printf("Errore HTTP: %d\n", httpCode);
+    http.end();
+    return;
   }
 
-  return str;
-}
-
-// Calcola i pixel a sinistra per centrare una stringa
-int centraStringa(String str)
-{
-  unsigned int stringLength = str.length();
-  int leftSpace = (int)((64 - (6 * stringLength)) / 2);
-  return leftSpace;
-}
-
-void syncRTCwithNTP()
-{
-  struct tm timeinfo;
-
-  if (getLocalTime(&timeinfo))
+  File file = SD.open(path, FILE_WRITE);
+  if (!file)
   {
+    Serial.println("Errore apertura file SD!");
+    http.end();
+    return;
+  }
 
-    // Converte struct tm in oggetto DateTime
-    DateTime dt(
-        timeinfo.tm_year + 1900,
-        timeinfo.tm_mon + 1,
-        timeinfo.tm_mday,
-        timeinfo.tm_hour,
-        timeinfo.tm_min,
-        timeinfo.tm_sec);
+  WiFiClient *stream = http.getStreamPtr();
+  uint8_t buffer[512];
+  size_t total = 0;
 
-    // Scrive l'orario sull'RTC
-    // rtc.begin();
-    rtc.adjust(dt);
+  Serial.println("Scaricamento in corso...");
+  while (http.connected())
+  {
+    size_t len = stream->readBytes(buffer, sizeof(buffer));
+    if (len > 0)
+    {
+      file.write(buffer, len);
+      total += len;
+    }
+    else
+      break;
+  }
 
-    Serial.print("RTC updated to: ");
-    Serial.println(&timeinfo, "%A, %d %B %Y %H:%M:%S");
+  file.close();
+  http.end();
+  Serial.printf("Feed salvato su SD (%u byte)\n", (unsigned int)total);
+}
+
+// Funzione per ripulire il feed RSS
+void cleanupFeed(const char *inputPath, const char *outputPath)
+{
+  File inFile = SD.open(inputPath, FILE_READ);
+  if (!inFile)
+  {
+    Serial.println("Errore: impossibile aprire il file sorgente.");
+    return;
+  }
+
+  File tempFile = SD.open(outputPath, FILE_WRITE);
+  if (!tempFile)
+  {
+    Serial.println("Errore: impossibile creare il file di output.");
+    inFile.close();
+    return;
+  }
+
+  bool foundRSS = false;
+  bool finishedRSS = false;
+  char window[6] = {0}; // buffer scorrevole per cercare pattern
+
+  while (inFile.available())
+  {
+    char c = inFile.read();
+
+    // Scorri il buffer di 1 posizione e aggiungi il nuovo carattere
+    memmove(window, window + 1, 5);
+    window[5] = c;
+
+    // --- TROVA INIZIO <rss ---
+    if (!foundRSS && strncmp(window + 2, "<rss", 4) == 0)
+    {
+      foundRSS = true;
+      tempFile.print("<rss");
+    }
+
+    // --- SE ABBIAMO TROVATO <rss> E NON ABBIAMO FINITO ---
+    else if (foundRSS && !finishedRSS)
+    {
+      tempFile.write(c);
+
+      // Controlla se abbiamo appena scritto la chiusura </rss>
+      if (strncmp(window + 1, "rss>", 4) == 0)
+      {
+        finishedRSS = true;
+        break; // stop lettura, ignoriamo tutto dopo </rss>
+      }
+    }
+  }
+
+  inFile.close();
+  tempFile.close();
+
+  if (foundRSS && finishedRSS)
+  {
+    Serial.println("Feed ripulito: salvato solo da <rss> a </rss>.");
+  }
+  else if (!foundRSS)
+  {
+    Serial.println("Tag <rss> non trovato nel file.");
+  }
+  else if (!finishedRSS)
+  {
+    Serial.println("Tag di chiusura </rss> non trovato (file incompleto).");
+  }
+
+  if (SD.remove("/feed.xml"))
+  {
+    Serial.println("File feed.xml cancellato con successo!");
+  }
+  else
+  {
+    Serial.println("Errore: impossibile cancellare feed.xml (forse non esiste?)");
   }
 }
 
@@ -232,20 +311,144 @@ void rimuoviAccenti(char *cdataBuffer)
   }
 }
 
-void XMLCALL startElement(void *userData, const char *name, const char **atts)
+// Funzione per il parsing RSS con TinyXML2
+void parseRSS(const char *path)
 {
-  if (strcmp(name, "item") == 0)
+  File file = SD.open(path, FILE_READ);
+  if (!file)
   {
-    insideItem = true;
+    Serial.println("Errore apertura file RSS!");
+    return;
   }
-  else if (insideItem && strcmp(name, "title") == 0)
+
+  // Legge tutto il file in un buffer (necessario per TinyXML2)
+  String xmlContent;
+  while (file.available())
   {
-    insideTitle = true;
-    cdataPos = 0;
-    cdataBuffer[0] = '\0';
+    xmlContent += (char)file.read();
+  }
+  file.close();
+
+  XMLDocument doc;
+  XMLError e = doc.Parse(xmlContent.c_str());
+  if (e != XML_SUCCESS)
+  {
+    Serial.print("Errore parsing XML: ");
+    Serial.println(e);
+    return;
+  }
+
+  newsList.removeAll(); // Cancella la lista delle notizie
+  indiceNotizia = 0;    // Resetta l'indice della notizia
+
+  // Ottieni nodo radice <rss>
+  XMLElement *rss = doc.FirstChildElement("rss");
+  if (!rss)
+  {
+    Serial.println("Tag <rss> non trovato!");
+    return;
+  }
+
+  // Trova <channel>
+  XMLElement *channel = rss->FirstChildElement("channel");
+  if (!channel)
+  {
+    Serial.println("Tag <channel> non trovato!");
+    return;
+  }
+
+  // --- Leggi info generali ---
+  const char *title = channel->FirstChildElement("title") ? channel->FirstChildElement("title")->GetText() : "";
+  const char *link = channel->FirstChildElement("link") ? channel->FirstChildElement("link")->GetText() : "";
+  const char *desc = channel->FirstChildElement("description") ? channel->FirstChildElement("description")->GetText() : "";
+
+  /*
+  Serial.println("=== RSS CHANNEL ===");
+  Serial.printf("Titolo: %s\n", title);
+  Serial.printf("Link:   %s\n", link);
+  Serial.printf("Descr:  %s\n\n", desc);
+  */
+
+  // --- Leggi tutti gli <item> ---
+  for (XMLElement *item = channel->FirstChildElement("item");
+       item != nullptr;
+       item = item->NextSiblingElement("item"))
+  {
+
+    const char *itemTitle = item->FirstChildElement("title") ? item->FirstChildElement("title")->GetText() : "";
+    const char *itemLink = item->FirstChildElement("link") ? item->FirstChildElement("link")->GetText() : "";
+    const char *itemDesc = item->FirstChildElement("description") ? item->FirstChildElement("description")->GetText() : "";
+
+    // Serial.println("--- ITEM ---");
+    Serial.printf("Titolo: %s\n", itemTitle);
+    // Converte in String per sicurezza
+    String titolo = String(itemTitle);
+
+    // Crea un buffer temporaneo (lunghezza dinamica)
+    char buffer[titolo.length() + 1];
+    titolo.toCharArray(buffer, sizeof(buffer));
+
+    // Rimuove accenti
+    rimuoviAccenti(buffer);
+    // Aggiunge la notizia alla lista (convertendo di nuovo in String)
+    newsList.add(String(buffer));
+
+    // Serial.printf("Link:   %s\n", itemLink);
+    // Serial.printf("Descr:  %s\n\n", itemDesc);
   }
 }
 
+String leftPad(int number, int totalLength)
+{
+  // Convertiamo il numero in stringa
+  String str = String(number);
+
+  // Calcoliamo quanto padding è necessario
+  int paddingNeeded = totalLength - str.length();
+
+  // Aggiungiamo zeri a sinistra
+  for (int i = 0; i < paddingNeeded; i++)
+  {
+    str = "0" + str; // Aggiungiamo uno zero a sinistra
+  }
+
+  return str;
+}
+
+// Calcola i pixel a sinistra per centrare una stringa
+int centraStringa(String str)
+{
+  unsigned int stringLength = str.length();
+  int leftSpace = (int)((64 - (6 * stringLength)) / 2);
+  return leftSpace;
+}
+
+void syncRTCwithNTP()
+{
+  struct tm timeinfo;
+
+  if (getLocalTime(&timeinfo))
+  {
+
+    // Converte struct tm in oggetto DateTime
+    DateTime dt(
+        timeinfo.tm_year + 1900,
+        timeinfo.tm_mon + 1,
+        timeinfo.tm_mday,
+        timeinfo.tm_hour,
+        timeinfo.tm_min,
+        timeinfo.tm_sec);
+
+    // Scrive l'orario sull'RTC
+    // rtc.begin();
+    rtc.adjust(dt);
+
+    Serial.print("RTC updated to: ");
+    Serial.println(&timeinfo, "%A, %d %B %Y %H:%M:%S");
+  }
+}
+
+/*
 void XMLCALL endElement(void *userData, const char *name)
 {
   if (strcmp(name, "item") == 0)
@@ -261,16 +464,7 @@ void XMLCALL endElement(void *userData, const char *name)
     newsList.add(cdataBuffer);   // Aggiungi il titolo alla lista delle notizie
   }
 }
-
-void XMLCALL characterData(void *userData, const char *s, int len)
-{
-  if (insideTitle && cdataPos + len < BUFFER_SIZE - 1)
-  {
-    strncat(cdataBuffer, s, len);
-    cdataPos += len;
-    cdataBuffer[cdataPos] = '\0';
-  }
-}
+  */
 
 void stampaOra()
 {
@@ -281,80 +475,6 @@ void stampaOra()
   Serial.print((now.minute() < 10 ? "0" : "") + String(now.minute(), DEC));
   Serial.print(":");
   Serial.println((now.second() < 10 ? "0" : "") + String(now.second(), DEC));
-}
-
-void fetchRSSFeed()
-{
-
-  Serial.println("Fetching RSS feed...");
-  if (WiFi.status() == WL_CONNECTED)
-  {
-    HTTPClient http;
-    http.begin(rss_feed_url);
-    int httpCode = http.GET();
-
-    if (httpCode > 0)
-    {
-      stampaOra();                                     // Stampa l'ora corrente
-      newsList.removeAll();                            // Cancella la lista delle notizie
-      indiceNotizia = 0;                               // Resetta l'indice della notizia
-      textX = PANEL_RES_X;                             // Resetta la posizione del testo
-      dma_display->fillRect(0, 24, PANEL_RES_X, 8, 0); // Cancella solo la riga del testo scorrevole
-
-      WiFiClient *stream = http.getStreamPtr();
-      XML_Parser parser = XML_ParserCreate("UTF-8");
-      XML_SetElementHandler(parser, startElement, endElement);
-      XML_SetCharacterDataHandler(parser, characterData);
-
-      char buffer[BUFFER_SIZE];
-
-      boolean xmlParsingInError = false;
-      while (stream->connected() && stream->available())
-      {
-        size_t len = stream->readBytes(buffer, sizeof(buffer));
-
-        delay(100);
-
-        // Serial.println("quello che leggo");
-        // Serial.println(buffer);
-        if (!XML_Parse(parser, buffer, len, false))
-        {
-          Serial.printf("Errore nel parsing XML: %s\n", XML_ErrorString(XML_GetErrorCode(parser)));
-          Serial.printf("Errore nel parsing XML alla riga %lu, colonna %lu: %s\n",
-                        XML_GetCurrentLineNumber(parser),
-                        XML_GetCurrentColumnNumber(parser),
-                        XML_ErrorString(XML_GetErrorCode(parser)));
-          xmlParsingInError = true;
-          break;
-        }
-      }
-
-      if (xmlParsingInError) {
-        newsUpdateInterval = 300000;
-      } else {
-        newsUpdateInterval = 600000;
-      }
-
-      // Segnala la fine del documento
-      XML_Parse(parser, nullptr, 0, true);
-
-      XML_ParserFree(parser);
-    }
-    else
-    {
-      // Serial.println("Error on HTTP request.");
-      Serial.printf("Errore HTTP (%d): impossibile scaricare il feed.", httpCode);
-    }
-
-    http.end();
-  }
-}
-
-void soundBuzzer()
-{
-  digitalWrite(BUZZER_PIN, HIGH); // Accende il buzzer
-  delay(500);                     // Suona per 1 secondo
-  digitalWrite(BUZZER_PIN, LOW);  // Spegne il buzzer
 }
 
 String readTemperatureAndHumidity()
@@ -397,11 +517,6 @@ void visualizzaTemperaturaUmidita()
   dma_display->print(readTemperatureAndHumidity());
 }
 
-void IRAM_ATTR handleInterrupt()
-{
-  hourInterrupt = true; // Imposta un flag quando si verifica l'interrupt
-}
-
 void clockChanged(uint8_t lum)
 {
   Serial.print("l: ");
@@ -417,6 +532,14 @@ void clockChanged(uint8_t lum)
     Serial.println("Clock spento");
     orologioAttivo = false; // Disattiva l'orologio
   }
+}
+
+// Funzione per scaricare, pulire e fare il parsing del feed RSS
+void fetchRSSFeed() {
+  Serial.println("Fetching RSS feed...");
+  scaricaFeed(rss_feed_url, "/feed.xml");
+  cleanupFeed("/feed.xml", "/feed_clean.xml");
+  parseRSS("/feed_clean.xml");
 }
 
 void setup()
@@ -454,6 +577,16 @@ void setup()
     Serial.println("Unknown reason");
     break;
   }
+
+  SPI.begin(18, 19, 23, SD_CS); // SCK = 18, MISO = 19, MOSI = 23
+  // Configura i pin fisici
+
+  if (!SD.begin(SD_CS))
+  {
+    Serial.println("Errore inizializzazione scheda SD");
+    return;
+  }
+  Serial.println("Scheda SD inizializzata.");
 
   // Connessione WiFi
   Serial.print("Connecting to WiFi");
@@ -512,11 +645,8 @@ void setup()
   // Avvia il client NTP
   // timeClient.begin();
 
-  pinMode(LDR_PIN, INPUT);        // Imposta il pin LDR come ingresso
-  pinMode(SQW_PIN, INPUT_PULLUP); // Configura il pin SQW come ingresso con resistenza pull-up
-  pinMode(BUZZER_PIN, OUTPUT);    // Configura il pin del buzzer come uscita
-
-  attachInterrupt(digitalPinToInterrupt(SQW_PIN), handleInterrupt, FALLING); // Configura l'interrupt sul pin SQW
+  pinMode(LDR_PIN, INPUT);     // Imposta il pin LDR come ingresso
+  //pinMode(BUZZER_PIN, OUTPUT); // Configura il pin del buzzer come uscita
 
   // initializing the rtc
   if (!rtc.begin())
@@ -599,7 +729,7 @@ void gestisciOrologio()
     lastUpdateNewsTime = millis();
     indiceNotizia = 0;
     textX = PANEL_RES_X;
-    fetchRSSFeed();
+    // fetchRSSFeed();
   }
 
   static unsigned long lastUpdateDisplay = 0;
@@ -684,24 +814,6 @@ void gestisciOrologio()
       dataGiornoState = DATA;
     }
   }
-
-  if (hourInterrupt)
-  {
-    hourInterrupt = false; // Resetta il flag dell'interrupt
-
-    DateTime now = rtc.now();
-    if (now.minute() == 30 && now.second() == 0)
-    {
-      syncRTCwithNTP(); // Sincronizza ogni mez'ora
-      Serial.println("Sincronizzazione RTC con NTP eseguita con successo.");
-    }
-
-    if (now.minute() == 0 && now.second() == 0)
-    { // Controlla se è l'inizio di una nuova ora
-      // Serial.println("Nuova ora! Suona il buzzer.");
-      soundBuzzer();
-    }
-  }
 }
 
 void loop()
@@ -709,6 +821,22 @@ void loop()
   espalexa.loop();
   delay(1); // Piccola pausa per evitare blocchi
   static boolean nextState = true;
+
+  // Aggiorna l'ora dal NTP ogni ora
+  static unsigned long lastUpdateTime = 0;
+  if (millis() > lastUpdateTime + timeUpdateInterval)
+  {
+    syncRTCwithNTP(); // Sincronizza ogni mez'ora
+    Serial.println("Sincronizzazione RTC con NTP eseguita con successo.");
+    lastUpdateTime = millis();
+  }
+
+  static unsigned long lastUpdateNews = 0;
+  if (millis() > lastUpdateNews + newsUpdateInterval)
+  {
+    fetchRSSFeed();
+    lastUpdateNews = millis();
+  }
 
   if (orologioAttivo)
   {
