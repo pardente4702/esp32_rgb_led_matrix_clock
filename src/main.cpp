@@ -67,8 +67,6 @@ RTC_DS3231 rtc;
 Adafruit_HTU21DF htu = Adafruit_HTU21DF();
 
 const int LDR_PIN = 34; // Pin analogico a cui è collegato il sensore LDR
-// const int SQW_PIN = 19;    // Pin SQW collegato all'ESP32
-// const int BUZZER_PIN = 18; // Pin del buzzer collegato all'ESP32
 
 char daysOfTheWeek[7][12] = {"Domenica", "Lunedi'", "Martedi'", "Mercoledi'", "Giovedi'", "Venerdi'", "Sabato"};
 const char *months[] = {"Gen", "Feb", "Mar", "Apr", "Mag", "Giu", "Lug", "Ago", "Set", "Ott", "Nov", "Dic"};
@@ -76,30 +74,21 @@ const char *months[] = {"Gen", "Feb", "Mar", "Apr", "Mag", "Giu", "Lug", "Ago", 
 uint32_t tempBrightnessUpdateInterval = 15000; // 15 secondi
 uint32_t scrollingSpeed = 15;
 
-// volatile bool hourInterrupt = false;
-
 // Imposta la luminosità minima e massima
 const int brightnessMin = 30;  // minimo di notte
 const int brightnessMax = 220; // massimo di giorno
 
-uint32_t newsUpdateInterval = 600000;  // 10 minuti
+uint32_t newsUpdateInterval = 1200000;  // 20 minuti
 uint32_t timeUpdateInterval = 3600000; // 1 ora
 
 int brightness = brightnessMax;
 
-const char *rss_feed_url = "https://www.ansa.it/lazio/notizie/lazio_rss.xml";
+//const char *rss_feed_url = "https://www.ansa.it/lazio/notizie/lazio_rss.xml";
+const char *rss_feed_url = "https://www.repubblica.it/rss/homepage/rss2.0.xml?ref=RHFT";
 
 uint8_t indiceNotizia = 0;
 
 List<String> newsList;
-
-// #define BUFFER_SIZE 512
-// #define BUFFER_SIZE 512
-// char cdataBuffer[BUFFER_SIZE];
-
-// size_t cdataPos = 0;
-// bool insideItem = false;
-// bool insideTitle = false;
 
 enum DataGiornoState
 {
@@ -448,24 +437,6 @@ void syncRTCwithNTP()
   }
 }
 
-/*
-void XMLCALL endElement(void *userData, const char *name)
-{
-  if (strcmp(name, "item") == 0)
-  {
-    insideItem = false;
-  }
-  else if (strcmp(name, "title") == 0 && insideTitle)
-  {
-    insideTitle = false;
-    Serial.print("Titolo: ");
-    Serial.println(cdataBuffer);
-    rimuoviAccenti(cdataBuffer); // Converti le lettere accentate
-    newsList.add(cdataBuffer);   // Aggiungi il titolo alla lista delle notizie
-  }
-}
-  */
-
 void stampaOra()
 {
   DateTime now = rtc.now();
@@ -646,7 +617,6 @@ void setup()
   // timeClient.begin();
 
   pinMode(LDR_PIN, INPUT);     // Imposta il pin LDR come ingresso
-  //pinMode(BUZZER_PIN, OUTPUT); // Configura il pin del buzzer come uscita
 
   // initializing the rtc
   if (!rtc.begin())
@@ -800,15 +770,16 @@ void gestisciOrologio()
   {
     if (millis() > Last_UPDATE_DataGiorno + 5000)
     {
-      int leftSpace = centraStringa("XXXXXXXXX");
+      //int leftSpace = centraStringa("XXXXXXXXX");
+      int leftSpace = 3;
       dma_display->fillRect(0, 8, PANEL_RES_X, 8, 0);
       dma_display->setCursor(leftSpace, 8);
       dma_display->setTextSize(1);
       dma_display->setTextColor(dma_display->color565(60, 180, 60));
       dma_display->print(leftPad(now.day(), 2));
-      dma_display->setCursor(leftSpace + 12, 8);
+      dma_display->setCursor(leftSpace + 14, 8);
       dma_display->print(months[now.month() - 1]);
-      dma_display->setCursor(leftSpace + 30, 8);
+      dma_display->setCursor(leftSpace + 34, 8);
       dma_display->print(now.year());
       Last_UPDATE_DataGiorno = millis();
       dataGiornoState = DATA;
