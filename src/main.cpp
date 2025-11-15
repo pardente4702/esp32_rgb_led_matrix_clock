@@ -78,12 +78,12 @@ uint32_t scrollingSpeed = 15;
 const int brightnessMin = 30;  // minimo di notte
 const int brightnessMax = 220; // massimo di giorno
 
-uint32_t newsUpdateInterval = 1200000;  // 20 minuti
+uint32_t newsUpdateInterval = 1200000; // 20 minuti
 uint32_t timeUpdateInterval = 3600000; // 1 ora
 
 int brightness = brightnessMax;
 
-//const char *rss_feed_url = "https://www.ansa.it/lazio/notizie/lazio_rss.xml";
+// const char *rss_feed_url = "https://www.ansa.it/lazio/notizie/lazio_rss.xml";
 const char *rss_feed_url = "https://www.repubblica.it/rss/homepage/rss2.0.xml?ref=RHFT";
 
 uint8_t indiceNotizia = 0;
@@ -301,13 +301,13 @@ void rimuoviAccenti(char *cdataBuffer)
 }
 
 // Funzione per il parsing RSS con TinyXML2
-void parseRSS(const char *path)
+boolean parseRSS(const char *path)
 {
   File file = SD.open(path, FILE_READ);
   if (!file)
   {
     Serial.println("Errore apertura file RSS!");
-    return;
+    return false;
   }
 
   // Legge tutto il file in un buffer (necessario per TinyXML2)
@@ -324,7 +324,7 @@ void parseRSS(const char *path)
   {
     Serial.print("Errore parsing XML: ");
     Serial.println(e);
-    return;
+    return false;
   }
 
   newsList.removeAll(); // Cancella la lista delle notizie
@@ -335,7 +335,7 @@ void parseRSS(const char *path)
   if (!rss)
   {
     Serial.println("Tag <rss> non trovato!");
-    return;
+    return false;
   }
 
   // Trova <channel>
@@ -343,7 +343,7 @@ void parseRSS(const char *path)
   if (!channel)
   {
     Serial.println("Tag <channel> non trovato!");
-    return;
+    return false;
   }
 
   // --- Leggi info generali ---
@@ -385,6 +385,7 @@ void parseRSS(const char *path)
     // Serial.printf("Link:   %s\n", itemLink);
     // Serial.printf("Descr:  %s\n\n", itemDesc);
   }
+  return true;
 }
 
 String leftPad(int number, int totalLength)
@@ -506,11 +507,16 @@ void clockChanged(uint8_t lum)
 }
 
 // Funzione per scaricare, pulire e fare il parsing del feed RSS
-void fetchRSSFeed() {
+void fetchRSSFeed()
+{
   Serial.println("Fetching RSS feed...");
   scaricaFeed(rss_feed_url, "/feed.xml");
   cleanupFeed("/feed.xml", "/feed_clean.xml");
-  parseRSS("/feed_clean.xml");
+  if (parseRSS("/feed_clean.xml")) {
+    newsUpdateInterval = 1200000; // Ripristina l'intervallo normale in caso di successo
+  } else {
+    newsUpdateInterval = 120000; // Riduci l'intervallo in caso di errore
+  }
 }
 
 void setup()
@@ -616,7 +622,7 @@ void setup()
   // Avvia il client NTP
   // timeClient.begin();
 
-  pinMode(LDR_PIN, INPUT);     // Imposta il pin LDR come ingresso
+  pinMode(LDR_PIN, INPUT); // Imposta il pin LDR come ingresso
 
   // initializing the rtc
   if (!rtc.begin())
@@ -770,7 +776,7 @@ void gestisciOrologio()
   {
     if (millis() > Last_UPDATE_DataGiorno + 5000)
     {
-      //int leftSpace = centraStringa("XXXXXXXXX");
+      // int leftSpace = centraStringa("XXXXXXXXX");
       int leftSpace = 3;
       dma_display->fillRect(0, 8, PANEL_RES_X, 8, 0);
       dma_display->setCursor(leftSpace, 8);
