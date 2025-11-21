@@ -3,11 +3,10 @@
 #include <RTClib.h>
 // #include <SHT21.h>
 #include "WifiCredentials.h"
+#include "SinricProCredentials.h"
 #include <time.h>
 #include <HTTPClient.h>
 #include <List.hpp>
-// #define ESPALEXA_DEBUG
-#include <Espalexa.h>
 #include <Wire.h>
 #include "Adafruit_HTU21DF.h"
 #include <SD.h>
@@ -15,7 +14,8 @@
 #include <TinyXML2.h>
 using namespace tinyxml2;
 
-Espalexa espalexa;
+#include "SinricPro.h"
+#include "SinricProSwitch.h"
 
 boolean orologioAttivo = true; // Variabile per controllare se l'orologio è attivo
 
@@ -489,23 +489,6 @@ void visualizzaTemperaturaUmidita()
   dma_display->print(readTemperatureAndHumidity());
 }
 
-void clockChanged(uint8_t lum)
-{
-  Serial.print("l: ");
-  Serial.println(lum);
-
-  if (lum)
-  {
-    Serial.println("Clock acceso");
-    orologioAttivo = true; // Attiva l'orologio
-  }
-  else
-  {
-    Serial.println("Clock spento");
-    orologioAttivo = false; // Disattiva l'orologio
-  }
-}
-
 // Funzione per scaricare, pulire e fare il parsing del feed RSS
 void fetchRSSFeed()
 {
@@ -517,6 +500,29 @@ void fetchRSSFeed()
   } else {
     newsUpdateInterval = 120000; // Riduci l'intervallo in caso di errore
   }
+}
+
+bool onPowerState1(const String &deviceId, bool &state)
+{
+  Serial.printf("Stato orologio: %s\r\n", state ? "on" : "off");
+  orologioAttivo = state;
+  return true; // request handled properly
+}
+
+// setup function for SinricPro
+void setupSinricPro()
+{
+  SinricProSwitch &mySwitch1 = SinricPro[SWITCH_ID_1];
+  mySwitch1.onPowerState(onPowerState1);
+
+  // setup SinricPro
+  SinricPro.onConnected([]()
+                        { Serial.printf("Connected to SinricPro\r\n"); });
+  SinricPro.onDisconnected([]()
+                           { Serial.printf("Disconnected from SinricPro\r\n"); });
+  SinricPro.restoreDeviceStates(true); // Uncomment to restore the last known state from the server.
+
+  SinricPro.begin(APP_KEY, APP_SECRET);
 }
 
 void setup()
@@ -587,15 +593,7 @@ void setup()
     Serial.println("\nConnected to WiFi");
     Serial.print("IP Address: ");
     Serial.println(WiFi.localIP());
-    espalexa.addDevice("Orologio", clockChanged);
-    if (espalexa.begin())
-    {
-      Serial.println("Espalexa started");
-    }
-    else
-    {
-      Serial.println("Espalexa failed to start");
-    }
+    
     // delay(2000); // Attendi 2 secondi per stabilizzare la connessione
   }
   else
@@ -670,6 +668,8 @@ void setup()
   dma_display->setBrightness8(brightness); // 0-255
   dma_display->clearScreen();
   dma_display->fillScreen(myBLACK);
+
+  setupSinricPro(); // Inizializza SinricPro
 
   fetchRSSFeed();
 
@@ -795,9 +795,10 @@ void gestisciOrologio()
 
 void loop()
 {
-  espalexa.loop();
   delay(1); // Piccola pausa per evitare blocchi
   static boolean nextState = true;
+
+  SinricPro.handle();
 
   // Aggiorna l'ora dal NTP ogni ora
   static unsigned long lastUpdateTime = 0;

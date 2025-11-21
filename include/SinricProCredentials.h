@@ -1,0 +1,3 @@
+#define APP_KEY "6a392fd1-32a0-4ac4-84dc-86e2c491a5dd"
+#define APP_SECRET "37a3d43b-aed7-4bf2-9994-f0916063a85d-60fe3c6c-f843-4b6c-8ce1-27791f2d8989" 
+#define SWITCH_ID_1 "691f88096dbd335b28e3054e"
