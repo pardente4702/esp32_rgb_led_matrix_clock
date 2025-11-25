@@ -90,12 +90,56 @@ uint8_t indiceNotizia = 0;
 
 List<String> newsList;
 
+// Handle per l'evento
+WiFiEventId_t wifiConnectHandler;
+WiFiEventId_t wifiDisconnectHandler;
+
 enum DataGiornoState
 {
   DATA,
   GIORNO
 }; // Stati possibili
 DataGiornoState dataGiornoState = DATA; // Stato iniziale
+
+bool onPowerState1(const String &deviceId, bool &state)
+{
+  Serial.printf("Stato orologio: %s\r\n", state ? "on" : "off");
+  orologioAttivo = state;
+  return true; // request handled properly
+}
+
+// setup function for SinricPro
+void setupSinricPro()
+{
+  SinricProSwitch &mySwitch1 = SinricPro[SWITCH_ID_1];
+  mySwitch1.onPowerState(onPowerState1);
+
+  // setup SinricPro
+  SinricPro.onConnected([]()
+                        { Serial.printf("Connected to SinricPro\r\n"); });
+  SinricPro.onDisconnected([]()
+                           { Serial.printf("Disconnected from SinricPro\r\n"); });
+  SinricPro.restoreDeviceStates(true); // Uncomment to restore the last known state from the server.
+
+  SinricPro.begin(APP_KEY, APP_SECRET);
+}
+
+// Callback quando ottiene l'IP
+void onWifiConnect(WiFiEvent_t event, WiFiEventInfo_t info)
+{
+  Serial.println("[WiFi] Connesso!");
+  Serial.print("[WiFi] IP: ");
+  Serial.println(WiFi.localIP());
+  setupSinricPro(); // Inizializza SinricPro
+}
+
+// Callback quando perde la connessione
+void onWifiDisconnect(WiFiEvent_t event, WiFiEventInfo_t info)
+{
+  Serial.println("[WiFi] Disconnesso!");
+  Serial.println("[WiFi] Tentativo di riconnessione...");
+  WiFi.reconnect();
+}
 
 // Funzione per scaricare il feed RSS e salvarlo su SD
 void scaricaFeed(String url, const char *path)
@@ -489,47 +533,48 @@ void visualizzaTemperaturaUmidita()
   dma_display->print(readTemperatureAndHumidity());
 }
 
-// Funzione per scaricare, pulire e fare il parsing del feed RSS
-void fetchRSSFeed()
+// Funzione per rimuovere duplicati da una lista di String
+void rimuoveDuplicati(List<String> &list)
 {
-  Serial.println("Fetching RSS feed...");
-  scaricaFeed(rss_feed_url, "/feed.xml");
-  cleanupFeed("/feed.xml", "/feed_clean.xml");
-  if (parseRSS("/feed_clean.xml")) {
-    newsUpdateInterval = 1200000; // Ripristina l'intervallo normale in caso di successo
-  } else {
-    newsUpdateInterval = 120000; // Riduci l'intervallo in caso di errore
+  for (int i = 0; i < list.getSize(); i++)
+  {
+    String current = list.get(i);
+
+    // Controlla tutti gli elementi successivi
+    for (int j = i + 1; j < list.getSize(); j++)
+    {
+      if (list.get(j) == current)
+      {
+        Serial.println("Rimuovo duplicato: " + current);
+        list.remove(j);
+        j--; // importantissimo: la lista si compatta
+      }
+    }
   }
 }
 
-bool onPowerState1(const String &deviceId, bool &state)
+// Funzione per scaricare, pulire e fare il parsing del feed RSS
+void fetchRSSFeed()
 {
-  Serial.printf("Stato orologio: %s\r\n", state ? "on" : "off");
-  orologioAttivo = state;
-  return true; // request handled properly
-}
-
-// setup function for SinricPro
-void setupSinricPro()
-{
-  SinricProSwitch &mySwitch1 = SinricPro[SWITCH_ID_1];
-  mySwitch1.onPowerState(onPowerState1);
-
-  // setup SinricPro
-  SinricPro.onConnected([]()
-                        { Serial.printf("Connected to SinricPro\r\n"); });
-  SinricPro.onDisconnected([]()
-                           { Serial.printf("Disconnected from SinricPro\r\n"); });
-  SinricPro.restoreDeviceStates(true); // Uncomment to restore the last known state from the server.
-
-  SinricPro.begin(APP_KEY, APP_SECRET);
+  Serial.println("Recupero feed RSS...");
+  scaricaFeed(rss_feed_url, "/feed.xml");
+  cleanupFeed("/feed.xml", "/feed_clean.xml");
+  if (parseRSS("/feed_clean.xml"))
+  {
+    newsUpdateInterval = 1200000; // Ripristina l'intervallo normale in caso di successo
+    rimuoveDuplicati(newsList);   // Rimuove duplicati
+  }
+  else
+  {
+    newsUpdateInterval = 120000; // Riduci l'intervallo in caso di errore
+  }
 }
 
 void setup()
 {
   Serial.begin(115200);
   esp_reset_reason_t reason = esp_reset_reason();
-  Serial.print("Reset reason: ");
+  Serial.print("Motivo Reset: ");
   switch (reason)
   {
   case ESP_RST_POWERON:
@@ -572,8 +617,21 @@ void setup()
   Serial.println("Scheda SD inizializzata.");
 
   // Connessione WiFi
-  Serial.print("Connecting to WiFi");
+  Serial.println("Connessione al WiFi");
+
+  // Impostazioni per una riconnessione "aggressiva"
+  // WiFi.persistent(false);       // evita scritture lente nella flash
+  // WiFi.setAutoReconnect(true);  // tenta sempre
+  // WiFi.setSleep(false);         // evita perdite di connessione
+  // WiFi.mode(WIFI_STA);
+
+  // Registrazione eventi
+  wifiConnectHandler = WiFi.onEvent(onWifiConnect, WiFiEvent_t::ARDUINO_EVENT_WIFI_STA_GOT_IP);
+  wifiDisconnectHandler = WiFi.onEvent(onWifiDisconnect, WiFiEvent_t::ARDUINO_EVENT_WIFI_STA_DISCONNECTED);
+
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+
+  /*
   int n = 0;
   while (WiFi.status() != WL_CONNECTED)
   {
@@ -593,13 +651,14 @@ void setup()
     Serial.println("\nConnected to WiFi");
     Serial.print("IP Address: ");
     Serial.println(WiFi.localIP());
-    
+
     // delay(2000); // Attendi 2 secondi per stabilizzare la connessione
   }
   else
   {
     Serial.println("\nNot connected to WiFi");
   }
+  */
 
   // Inizializza I2C (puoi cambiare i pin se necessario)
   Wire.begin(21, 22); // SDA = 21, SCL = 22
@@ -668,8 +727,6 @@ void setup()
   dma_display->setBrightness8(brightness); // 0-255
   dma_display->clearScreen();
   dma_display->fillScreen(myBLACK);
-
-  setupSinricPro(); // Inizializza SinricPro
 
   fetchRSSFeed();
 
