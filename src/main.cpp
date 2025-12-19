@@ -90,9 +90,8 @@ uint8_t indiceNotizia = 0;
 
 List<String> newsList;
 
-// Handle per l'evento
-WiFiEventId_t wifiConnectHandler;
-WiFiEventId_t wifiDisconnectHandler;
+unsigned long lastAttempt = 0;
+const long interval = 5000; // Try to reconnect every 5 seconds
 
 enum DataGiornoState
 {
@@ -122,23 +121,6 @@ void setupSinricPro()
   SinricPro.restoreDeviceStates(true); // Uncomment to restore the last known state from the server.
 
   SinricPro.begin(APP_KEY, APP_SECRET);
-}
-
-// Callback quando ottiene l'IP
-void onWifiConnect(WiFiEvent_t event, WiFiEventInfo_t info)
-{
-  Serial.println("[WiFi] Connesso!");
-  Serial.print("[WiFi] IP: ");
-  Serial.println(WiFi.localIP());
-  setupSinricPro(); // Inizializza SinricPro
-}
-
-// Callback quando perde la connessione
-void onWifiDisconnect(WiFiEvent_t event, WiFiEventInfo_t info)
-{
-  Serial.println("[WiFi] Disconnesso!");
-  Serial.println("[WiFi] Tentativo di riconnessione...");
-  WiFi.reconnect();
 }
 
 // Funzione per scaricare il feed RSS e salvarlo su SD
@@ -570,6 +552,23 @@ void fetchRSSFeed()
   }
 }
 
+void espRestartIfNotConnected()
+{
+  int n = 0;
+  while (WiFi.status() != WL_CONNECTED)
+  {
+    Serial.print(".");
+    delay(1000);
+    n++;
+    if (n >= 10)
+    {
+      ESP.restart();
+      delay(3000);
+      n = 0;
+    }
+  }
+}
+
 void setup()
 {
   Serial.begin(115200);
@@ -616,49 +615,26 @@ void setup()
   }
   Serial.println("Scheda SD inizializzata.");
 
-  // Connessione WiFi
-  Serial.println("Connessione al WiFi");
-
-  // Impostazioni per una riconnessione "aggressiva"
-  // WiFi.persistent(false);       // evita scritture lente nella flash
-  // WiFi.setAutoReconnect(true);  // tenta sempre
-  // WiFi.setSleep(false);         // evita perdite di connessione
-  // WiFi.mode(WIFI_STA);
-
-  // Registrazione eventi
-  wifiConnectHandler = WiFi.onEvent(onWifiConnect, WiFiEvent_t::ARDUINO_EVENT_WIFI_STA_GOT_IP);
-  wifiDisconnectHandler = WiFi.onEvent(onWifiDisconnect, WiFiEvent_t::ARDUINO_EVENT_WIFI_STA_DISCONNECTED);
-
+  // Connessione al WiFi
+  Serial.println("In attesa di connettersi al WiFi");
+  WiFi.mode(WIFI_STA);
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
 
-  /*
-  int n = 0;
-  while (WiFi.status() != WL_CONNECTED)
-  {
-    Serial.print(".");
-    delay(1000);
-    n++;
-    if (n >= 10)
-    {
-      ESP.restart();
-      delay(3000);
-      n = 0;
-    }
-  }
+  espRestartIfNotConnected();
 
   if (WiFi.status() == WL_CONNECTED)
   {
-    Serial.println("\nConnected to WiFi");
-    Serial.print("IP Address: ");
+    Serial.println("\nConnesso al WiFi");
+    Serial.print("Indirizzo IP: ");
     Serial.println(WiFi.localIP());
 
-    // delay(2000); // Attendi 2 secondi per stabilizzare la connessione
+    delay(1000);      // Attendi 1 secondo per stabilizzare la connessione
+    setupSinricPro(); // Inizializza SinricPro dopo la connessione WiFi
   }
   else
   {
-    Serial.println("\nNot connected to WiFi");
+    Serial.println("\nNon connesso al WiFi");
   }
-  */
 
   // Inizializza I2C (puoi cambiare i pin se necessario)
   Wire.begin(21, 22); // SDA = 21, SCL = 22
@@ -854,23 +830,37 @@ void loop()
 {
   delay(1); // Piccola pausa per evitare blocchi
   static boolean nextState = true;
-
-  SinricPro.handle();
-
-  // Aggiorna l'ora dal NTP ogni ora
-  static unsigned long lastUpdateTime = 0;
-  if (millis() > lastUpdateTime + timeUpdateInterval)
-  {
-    syncRTCwithNTP(); // Sincronizza ogni mez'ora
-    Serial.println("Sincronizzazione RTC con NTP eseguita con successo.");
-    lastUpdateTime = millis();
-  }
-
   static unsigned long lastUpdateNews = 0;
-  if (millis() > lastUpdateNews + newsUpdateInterval)
+
+  if (WiFi.status() != WL_CONNECTED)
   {
-    fetchRSSFeed();
-    lastUpdateNews = millis();
+    if (millis() - lastAttempt >= interval)
+    {
+      Serial.println("WiFi disconnesso. In attesa di riconnessione...");
+      WiFi.disconnect(); // Optional: clear old connection
+      WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+      lastAttempt = millis();
+
+      espRestartIfNotConnected();
+    }
+  }
+  else
+  {
+    SinricPro.handle();
+
+    // Aggiorna l'ora dal NTP ogni ora
+    static unsigned long lastUpdateTime = 0;
+    if (millis() > lastUpdateTime + timeUpdateInterval)
+    {
+      syncRTCwithNTP(); // Sincronizza ogni mez'ora
+      Serial.println("Sincronizzazione RTC con NTP eseguita con successo.");
+      lastUpdateTime = millis();
+    }
+    if (millis() > lastUpdateNews + newsUpdateInterval)
+    {
+      fetchRSSFeed();
+      lastUpdateNews = millis();
+    }
   }
 
   if (orologioAttivo)
