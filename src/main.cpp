@@ -3,7 +3,7 @@
 #include <RTClib.h>
 // #include <SHT21.h>
 #include "WifiCredentials.h"
-#include "SinricProCredentials.h"
+//#include "SinricProCredentials.h"
 #include <time.h>
 #include <HTTPClient.h>
 #include <List.hpp>
@@ -14,8 +14,8 @@
 #include <TinyXML2.h>
 using namespace tinyxml2;
 
-#include "SinricPro.h"
-#include "SinricProSwitch.h"
+//#include "SinricPro.h"
+//#include "SinricProSwitch.h"
 
 boolean orologioAttivo = true; // Variabile per controllare se l'orologio è attivo
 
@@ -108,6 +108,7 @@ bool onPowerState1(const String &deviceId, bool &state)
 }
 
 // setup function for SinricPro
+/*
 void setupSinricPro()
 {
   SinricProSwitch &mySwitch1 = SinricPro[SWITCH_ID_1];
@@ -122,6 +123,7 @@ void setupSinricPro()
 
   SinricPro.begin(APP_KEY, APP_SECRET);
 }
+*/
 
 // Funzione per scaricare il feed RSS e salvarlo su SD
 void scaricaFeed(String url, const char *path)
@@ -629,7 +631,7 @@ void setup()
     Serial.println(WiFi.localIP());
 
     delay(1000);      // Attendi 1 secondo per stabilizzare la connessione
-    setupSinricPro(); // Inizializza SinricPro dopo la connessione WiFi
+    //setupSinricPro(); // Inizializza SinricPro dopo la connessione WiFi
   }
   else
   {
@@ -846,7 +848,7 @@ void loop()
   }
   else
   {
-    SinricPro.handle();
+    //SinricPro.handle();
 
     // Aggiorna l'ora dal NTP ogni ora
     static unsigned long lastUpdateTime = 0;
