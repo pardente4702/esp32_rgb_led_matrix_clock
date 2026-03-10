@@ -9,6 +9,11 @@
 #include <List.hpp>
 #include <Wire.h>
 #include "Adafruit_HTU21DF.h"
+#include <Adafruit_GFX.h>
+#include <Fonts/FreeSans9pt7b.h>
+#include <Fonts/FreeSansBold9pt7b.h>
+#include <Fonts/Org_01.h>
+#include <Fonts/TomThumb.h>
 #include <SD.h>
 #include <SPI.h>
 #include <TinyXML2.h>
@@ -59,6 +64,7 @@ uint16_t myBLUE = dma_display->color565(0, 0, 255);
 char lastTimeStr[9] = "00:00:00";
 char scrollingText[256] = {0};
 int textX = PANEL_RES_X;
+const char *newsSeparator = " - ";
 
 RTC_DS3231 rtc;
 // SHT21 sht;
@@ -72,7 +78,7 @@ char daysOfTheWeek[7][12] = {"Domenica", "Lunedi'", "Martedi'", "Mercoledi'", "G
 const char *months[] = {"Gen", "Feb", "Mar", "Apr", "Mag", "Giu", "Lug", "Ago", "Set", "Ott", "Nov", "Dic"};
 
 uint32_t tempBrightnessUpdateInterval = 15000; // 15 secondi
-uint32_t scrollingSpeed = 15;
+uint32_t scrollingSpeed = 22;
 
 // Imposta la luminosità minima e massima
 const int brightnessMin = 30;  // minimo di notte
@@ -93,12 +99,19 @@ List<String> newsList;
 unsigned long lastAttempt = 0;
 const long interval = 5000; // Try to reconnect every 5 seconds
 
-enum DataGiornoState
+enum InfoRowState
 {
-  DATA,
-  GIORNO
-}; // Stati possibili
-DataGiornoState dataGiornoState = DATA; // Stato iniziale
+  INFO_TEMP,
+  INFO_DAY,
+  INFO_DATE
+};
+InfoRowState infoRowState = INFO_TEMP;
+
+const uint8_t TIME_AREA_TOP = 0;
+const uint8_t TIME_AREA_HEIGHT = 16;
+const uint8_t INFO_ROW_Y = 16;
+const uint8_t NEWS_ROW_Y = 24;
+const uint8_t TIME_LEFT_X = 2;
 
 bool onPowerState1(const String &deviceId, bool &state)
 {
@@ -507,14 +520,108 @@ String readTemperatureAndHumidity()
   return bufferTemp;
 }
 
-void visualizzaTemperaturaUmidita()
+void visualizzaInfoRiga(DateTime now)
 {
-  dma_display->fillRect(0, 0, PANEL_RES_X, 8, 0);
-  dma_display->setCursor(2, 0);
+  dma_display->fillRect(0, INFO_ROW_Y, PANEL_RES_X, 8, 0);
   dma_display->setTextSize(1);
-  dma_display->setTextColor(dma_display->color565(255, 0, 0));
   dma_display->setTextWrap(false);
-  dma_display->print(readTemperatureAndHumidity());
+
+  if (infoRowState == INFO_TEMP)
+  {
+    dma_display->setCursor(2, INFO_ROW_Y);
+    dma_display->setTextColor(dma_display->color565(255, 0, 0));
+    dma_display->print(readTemperatureAndHumidity());
+  }
+  else if (infoRowState == INFO_DAY)
+  {
+    int leftSpace = centraStringa((String)daysOfTheWeek[now.dayOfTheWeek()]);
+    dma_display->setCursor(leftSpace, INFO_ROW_Y);
+    dma_display->setTextColor(dma_display->color565(60, 180, 60));
+    dma_display->print(daysOfTheWeek[now.dayOfTheWeek()]);
+  }
+  else
+  {
+    int leftSpace = 3;
+    dma_display->setCursor(leftSpace, INFO_ROW_Y);
+    dma_display->setTextColor(dma_display->color565(60, 180, 60));
+    dma_display->print(leftPad(now.day(), 2));
+    dma_display->setCursor(leftSpace + 14, INFO_ROW_Y);
+    dma_display->print(months[now.month() - 1]);
+    dma_display->setCursor(leftSpace + 34, INFO_ROW_Y);
+    dma_display->print(now.year());
+  }
+}
+
+void visualizzaOraGrande(const String &hours, const String &minutes, const String &seconds)
+{
+  String hh = hours;
+  String mm = minutes;
+  String ss = seconds;
+
+  int16_t x1, y1, x2, y2;
+  uint16_t w1, h1, w2, h2;
+
+  dma_display->setFont(&FreeSansBold9pt7b);
+  dma_display->getTextBounds("88:88", 0, 0, &x1, &y1, &w1, &h1);
+
+  dma_display->setFont(&Org_01);
+  dma_display->getTextBounds(":88", 0, 0, &x2, &y2, &w2, &h2);
+
+  int startX = TIME_LEFT_X;
+  int ascent1 = -y1;
+  int ascent2 = -y2;
+  int descent1 = (int)h1 - ascent1;
+  int descent2 = (int)h2 - ascent2;
+  int totalHeight = max(ascent1, ascent2) + max(descent1, descent2);
+  int baseline = TIME_AREA_TOP + (TIME_AREA_HEIGHT - totalHeight) / 2 + max(ascent1, ascent2);
+
+  dma_display->fillRect(0, TIME_AREA_TOP, PANEL_RES_X, TIME_AREA_HEIGHT, 0);
+
+  bool blinkOn = (seconds.toInt() % 2) == 0;
+  uint16_t pink = dma_display->color565(255, 105, 180);
+  uint16_t blue = dma_display->color565(100, 200, 255);
+  uint16_t yellow = dma_display->color565(255, 255, 0);
+  uint16_t lightBlue = dma_display->color565(180, 220, 255);
+
+  int x = startX;
+
+  dma_display->setFont(&FreeSansBold9pt7b);
+  dma_display->setTextColor(pink);
+  dma_display->setCursor(x, baseline);
+  dma_display->print(hh);
+  int16_t bx, by;
+  uint16_t bw, bh;
+  dma_display->getTextBounds(hh, 0, 0, &bx, &by, &bw, &bh);
+  x += bw;
+
+  x += 1;
+  dma_display->setTextColor(yellow);
+  dma_display->setCursor(x, baseline);
+  dma_display->print(":");
+  dma_display->getTextBounds(":", 0, 0, &bx, &by, &bw, &bh);
+  x += bw + 1;
+
+  dma_display->setTextColor(blue);
+  dma_display->setCursor(x, baseline);
+  dma_display->print(mm);
+  dma_display->getTextBounds(mm, 0, 0, &bx, &by, &bw, &bh);
+  x += bw + 2;
+
+  dma_display->setFont(&Org_01);
+  x += 1;
+  dma_display->setTextColor(blinkOn ? lightBlue : myBLACK);
+  dma_display->setCursor(x, baseline);
+  dma_display->print(":");
+  dma_display->getTextBounds(":", 0, 0, &bx, &by, &bw, &bh);
+  x += bw + 1;
+
+  dma_display->setTextColor(lightBlue);
+  dma_display->setCursor(x, baseline);
+  dma_display->print(ss);
+
+  dma_display->setFont(); // reset to default
+  dma_display->setTextSize(1);
+  dma_display->setTextWrap(false);
 }
 
 // Funzione per rimuovere duplicati da una lista di String
@@ -708,7 +815,7 @@ void setup()
 
   fetchRSSFeed();
 
-  visualizzaTemperaturaUmidita();
+  visualizzaInfoRiga(rtc.now());
 }
 
 void gestisciOrologio()
@@ -724,11 +831,7 @@ void gestisciOrologio()
 
   if (strcmp(timeStr, lastTimeStr) != 0)
   {                                                  // Aggiorna solo se cambia
-    dma_display->fillRect(0, 16, PANEL_RES_X, 8, 0); // Cancella solo l'area dell'orario
-    dma_display->setCursor(8, 16);
-    dma_display->setTextSize(1);
-    dma_display->setTextColor(dma_display->color565(100, 200, 255));
-    dma_display->print(timeStr);
+    visualizzaOraGrande(hours, minutes, seconds);
     strcpy(lastTimeStr, timeStr);
   }
 
@@ -748,25 +851,31 @@ void gestisciOrologio()
   {
     lastUpdateDisplay = millis();
     String notizia = newsList.get(indiceNotizia);
-
-    notizia.toCharArray(scrollingText, sizeof(scrollingText));
+    String notiziaSuccessiva = newsList.get((indiceNotizia + 1) % newsList.getSize());
+    String testoScorrevole = notizia + newsSeparator + notiziaSuccessiva;
+    if (testoScorrevole.length() >= (int)sizeof(scrollingText))
+    {
+      testoScorrevole.remove(sizeof(scrollingText) - 1);
+    }
+    testoScorrevole.toCharArray(scrollingText, sizeof(scrollingText));
     // Testo scorrevole
-    dma_display->fillRect(0, 24, PANEL_RES_X, 8, 0); // Cancella solo la riga del testo scorrevole
-    dma_display->setCursor(textX, 24);
+    dma_display->fillRect(0, NEWS_ROW_Y, PANEL_RES_X, 8, 0); // Cancella solo la riga del testo scorrevole
+    dma_display->setFont();
     dma_display->setTextSize(1);
-    dma_display->setTextColor(dma_display->color565(255, 255, 0));
+    dma_display->setCursor(textX, NEWS_ROW_Y);
+    dma_display->setTextColor(dma_display->color565(255, 255, 255));
     dma_display->print(scrollingText);
     // dma_display->show();
 
     textX--;
-    int limiteNegativo = 0 - ((notizia.length()) * 6);
+    int lunghezzaBloccoCorrente = (notizia.length() + strlen(newsSeparator)) * 6;
+    int limiteNegativo = 0 - lunghezzaBloccoCorrente;
     if (textX < limiteNegativo)
     {
       // Serial.print("Visualizzo la notizia numero ");
       // Serial.println(indiceNotizia);
-      textX = PANEL_RES_X;
-      indiceNotizia++;
-      indiceNotizia = indiceNotizia % newsList.getSize();
+      textX += lunghezzaBloccoCorrente;
+      indiceNotizia = (indiceNotizia + 1) % newsList.getSize();
     }
   }
 
@@ -775,8 +884,6 @@ void gestisciOrologio()
   if (millis() > lastUpdateTime + tempBrightnessUpdateInterval)
   {
     lastUpdateTime = millis();
-
-    visualizzaTemperaturaUmidita();
 
     int ldrValue = analogRead(LDR_PIN); // Legge il valore analogico dal sensore LDR
     // Serial.print("LDR value: ");
@@ -790,41 +897,18 @@ void gestisciOrologio()
     // syncRTCwithNTP();
   }
 
-  // Alterno la visualizzazione del giorno della settimana e della data odierna
-  static unsigned long Last_UPDATE_DataGiorno = 0;
-  if (dataGiornoState == DATA)
+  // Alterno contenuti della riga info
+  static unsigned long lastUpdateInfoRow = 0;
+  if (millis() > lastUpdateInfoRow + 5000)
   {
-    if (millis() > Last_UPDATE_DataGiorno + 5000)
-    {
-      int leftSpace = centraStringa((String)daysOfTheWeek[now.dayOfTheWeek()]);
-      dma_display->fillRect(0, 8, PANEL_RES_X, 8, 0);
-      dma_display->setCursor(leftSpace, 8);
-      dma_display->setTextSize(1);
-      dma_display->setTextColor(dma_display->color565(60, 180, 60));
-      dma_display->setTextWrap(false);
-      dma_display->print(daysOfTheWeek[now.dayOfTheWeek()]);
-      Last_UPDATE_DataGiorno = millis();
-      dataGiornoState = GIORNO;
-    }
-  }
-  else
-  {
-    if (millis() > Last_UPDATE_DataGiorno + 5000)
-    {
-      // int leftSpace = centraStringa("XXXXXXXXX");
-      int leftSpace = 3;
-      dma_display->fillRect(0, 8, PANEL_RES_X, 8, 0);
-      dma_display->setCursor(leftSpace, 8);
-      dma_display->setTextSize(1);
-      dma_display->setTextColor(dma_display->color565(60, 180, 60));
-      dma_display->print(leftPad(now.day(), 2));
-      dma_display->setCursor(leftSpace + 14, 8);
-      dma_display->print(months[now.month() - 1]);
-      dma_display->setCursor(leftSpace + 34, 8);
-      dma_display->print(now.year());
-      Last_UPDATE_DataGiorno = millis();
-      dataGiornoState = DATA;
-    }
+    visualizzaInfoRiga(now);
+    lastUpdateInfoRow = millis();
+    if (infoRowState == INFO_TEMP)
+      infoRowState = INFO_DAY;
+    else if (infoRowState == INFO_DAY)
+      infoRowState = INFO_DATE;
+    else
+      infoRowState = INFO_TEMP;
   }
 }
 
