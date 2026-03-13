@@ -60,6 +60,9 @@ uint16_t myWHITE = dma_display->color565(255, 255, 255);
 uint16_t myRED = dma_display->color565(255, 0, 0);
 uint16_t myGREEN = dma_display->color565(0, 255, 0);
 uint16_t myBLUE = dma_display->color565(0, 0, 255);
+uint16_t myNEWS = dma_display->color565(80, 200, 255);
+uint16_t myHOURS = dma_display->color565(255, 105, 180);
+uint16_t myMINUTES = dma_display->color565(80, 200, 255);
 
 char lastTimeStr[9] = "00:00:00";
 char scrollingText[256] = {0};
@@ -78,7 +81,7 @@ char daysOfTheWeek[7][12] = {"Domenica", "Lunedi'", "Martedi'", "Mercoledi'", "G
 const char *months[] = {"Gen", "Feb", "Mar", "Apr", "Mag", "Giu", "Lug", "Ago", "Set", "Ott", "Nov", "Dic"};
 
 uint32_t tempBrightnessUpdateInterval = 15000; // 15 secondi
-uint32_t scrollingSpeed = 22;
+uint32_t scrollingSpeed = 20;
 
 // Imposta la luminosità minima e massima
 const int brightnessMin = 30;  // minimo di notte
@@ -578,15 +581,13 @@ void visualizzaOraGrande(const String &hours, const String &minutes, const Strin
   dma_display->fillRect(0, TIME_AREA_TOP, PANEL_RES_X, TIME_AREA_HEIGHT, 0);
 
   bool blinkOn = (seconds.toInt() % 2) == 0;
-  uint16_t pink = dma_display->color565(255, 105, 180);
-  uint16_t blue = dma_display->color565(100, 200, 255);
   uint16_t yellow = dma_display->color565(255, 255, 0);
   uint16_t lightBlue = dma_display->color565(180, 220, 255);
 
   int x = startX;
 
   dma_display->setFont(&FreeSansBold9pt7b);
-  dma_display->setTextColor(pink);
+  dma_display->setTextColor(myHOURS);
   dma_display->setCursor(x, baseline);
   dma_display->print(hh);
   int16_t bx, by;
@@ -594,20 +595,21 @@ void visualizzaOraGrande(const String &hours, const String &minutes, const Strin
   dma_display->getTextBounds(hh, 0, 0, &bx, &by, &bw, &bh);
   x += bw;
 
-  x += 1;
+  x += 2;
   dma_display->setTextColor(yellow);
   dma_display->setCursor(x, baseline);
   dma_display->print(":");
   dma_display->getTextBounds(":", 0, 0, &bx, &by, &bw, &bh);
   x += bw + 1;
 
-  dma_display->setTextColor(blue);
+  dma_display->setTextColor(myMINUTES);
   dma_display->setCursor(x, baseline);
   dma_display->print(mm);
   dma_display->getTextBounds(mm, 0, 0, &bx, &by, &bw, &bh);
   x += bw + 2;
 
-  dma_display->setFont(&Org_01);
+  dma_display->setFont(&TomThumb);
+  dma_display->setTextSize(1);
   x += 1;
   dma_display->setTextColor(blinkOn ? lightBlue : myBLACK);
   dma_display->setCursor(x, baseline);
@@ -863,7 +865,7 @@ void gestisciOrologio()
     dma_display->setFont();
     dma_display->setTextSize(1);
     dma_display->setCursor(textX, NEWS_ROW_Y);
-    dma_display->setTextColor(dma_display->color565(255, 255, 255));
+    dma_display->setTextColor(myNEWS);
     dma_display->print(scrollingText);
     // dma_display->show();
 
