@@ -60,7 +60,7 @@ uint16_t myWHITE = dma_display->color565(255, 255, 255);
 uint16_t myRED = dma_display->color565(255, 0, 0);
 uint16_t myGREEN = dma_display->color565(0, 255, 0);
 uint16_t myBLUE = dma_display->color565(0, 0, 255);
-uint16_t myNEWS = dma_display->color565(80, 200, 255);
+uint16_t myNEWS = dma_display->color565(255, 255, 0);
 uint16_t myHOURS = dma_display->color565(255, 105, 180);
 uint16_t myMINUTES = dma_display->color565(80, 200, 255);
 
@@ -115,6 +115,16 @@ const uint8_t TIME_AREA_HEIGHT = 16;
 const uint8_t INFO_ROW_Y = 16;
 const uint8_t NEWS_ROW_Y = 24;
 const uint8_t TIME_LEFT_X = 2;
+
+bool wifiConnected()
+{
+  return WiFi.status() == WL_CONNECTED;
+}
+
+void clearNewsRow()
+{
+  dma_display->fillRect(0, NEWS_ROW_Y, PANEL_RES_X, 8, 0);
+}
 
 bool onPowerState1(const String &deviceId, bool &state)
 {
@@ -649,6 +659,12 @@ void rimuoveDuplicati(List<String> &list)
 // Funzione per scaricare, pulire e fare il parsing del feed RSS
 void fetchRSSFeed()
 {
+  if (!wifiConnected())
+  {
+    Serial.println("WiFi non disponibile: salto aggiornamento news.");
+    return;
+  }
+
   Serial.println("Recupero feed RSS...");
   scaricaFeed(rss_feed_url, "/feed.xml");
   cleanupFeed("/feed.xml", "/feed_clean.xml");
@@ -663,21 +679,16 @@ void fetchRSSFeed()
   }
 }
 
-void espRestartIfNotConnected()
+bool waitForWiFiConnection(unsigned long timeoutMs)
 {
-  int n = 0;
-  while (WiFi.status() != WL_CONNECTED)
+  unsigned long start = millis();
+  while (!wifiConnected() && (millis() - start < timeoutMs))
   {
     Serial.print(".");
-    delay(1000);
-    n++;
-    if (n >= 10)
-    {
-      ESP.restart();
-      delay(3000);
-      n = 0;
-    }
+    delay(500);
   }
+
+  return wifiConnected();
 }
 
 void setup()
@@ -731,9 +742,7 @@ void setup()
   WiFi.mode(WIFI_STA);
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
 
-  espRestartIfNotConnected();
-
-  if (WiFi.status() == WL_CONNECTED)
+  if (waitForWiFiConnection(10000))
   {
     Serial.println("\nConnesso al WiFi");
     Serial.print("Indirizzo IP: ");
@@ -815,7 +824,14 @@ void setup()
   dma_display->clearScreen();
   dma_display->fillScreen(myBLACK);
 
-  fetchRSSFeed();
+  if (wifiConnected())
+  {
+    fetchRSSFeed();
+  }
+  else
+  {
+    clearNewsRow();
+  }
 
   visualizzaInfoRiga(rtc.now());
 }
@@ -849,7 +865,11 @@ void gestisciOrologio()
   }
 
   static unsigned long lastUpdateDisplay = 0;
-  if ((millis() > lastUpdateDisplay + scrollingSpeed) && (newsList.getSize() > 0))
+  if (!wifiConnected() || (newsList.getSize() == 0))
+  {
+    clearNewsRow();
+  }
+  else if (millis() > lastUpdateDisplay + scrollingSpeed)
   {
     lastUpdateDisplay = millis();
     String notizia = newsList.get(indiceNotizia);
@@ -860,8 +880,7 @@ void gestisciOrologio()
       testoScorrevole.remove(sizeof(scrollingText) - 1);
     }
     testoScorrevole.toCharArray(scrollingText, sizeof(scrollingText));
-    // Testo scorrevole
-    dma_display->fillRect(0, NEWS_ROW_Y, PANEL_RES_X, 8, 0); // Cancella solo la riga del testo scorrevole
+    clearNewsRow();
     dma_display->setFont();
     dma_display->setTextSize(1);
     dma_display->setCursor(textX, NEWS_ROW_Y);
@@ -920,16 +939,18 @@ void loop()
   static boolean nextState = true;
   static unsigned long lastUpdateNews = 0;
 
-  if (WiFi.status() != WL_CONNECTED)
+  if (!wifiConnected())
   {
     if (millis() - lastAttempt >= interval)
     {
       Serial.println("WiFi disconnesso. In attesa di riconnessione...");
-      WiFi.disconnect(); // Optional: clear old connection
+      clearNewsRow();
+      newsList.removeAll();
+      indiceNotizia = 0;
+      textX = PANEL_RES_X;
+      WiFi.disconnect();
       WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
       lastAttempt = millis();
-
-      espRestartIfNotConnected();
     }
   }
   else
