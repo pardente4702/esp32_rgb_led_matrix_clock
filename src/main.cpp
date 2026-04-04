@@ -17,7 +17,28 @@
 #include <SD.h>
 #include <SPI.h>
 #include <TinyXML2.h>
+#include <math.h>
 using namespace tinyxml2;
+
+#if __has_include("WeatherCredentials.h")
+#include "WeatherCredentials.h"
+#endif
+
+#ifndef WEATHER_API_KEY
+#define WEATHER_API_KEY ""
+#endif
+
+#ifndef WEATHER_CITY
+#define WEATHER_CITY ""
+#endif
+
+#ifndef WEATHER_UNITS
+#define WEATHER_UNITS "metric"
+#endif
+
+#ifndef WEATHER_LANG
+#define WEATHER_LANG "it"
+#endif
 
 //#include "SinricPro.h"
 //#include "SinricProSwitch.h"
@@ -89,6 +110,8 @@ const int brightnessMax = 220; // massimo di giorno
 
 uint32_t newsUpdateInterval = 1200000; // 20 minuti
 uint32_t timeUpdateInterval = 3600000; // 1 ora
+uint32_t weatherUpdateInterval = 900000; // 15 minuti
+uint32_t topRowToggleInterval = 10000;   // 10 secondi
 
 int brightness = brightnessMax;
 
@@ -116,9 +139,128 @@ const uint8_t INFO_ROW_Y = 16;
 const uint8_t NEWS_ROW_Y = 24;
 const uint8_t TIME_LEFT_X = 2;
 
+struct WeatherData
+{
+  bool valid = false;
+  bool isDay = true;
+  int temperature = 0;
+  int conditionId = 800;
+  unsigned long lastUpdateMs = 0;
+};
+
+WeatherData weatherData;
+bool topRowShowingWeather = false;
+bool weatherRenderDirty = true;
+
 bool wifiConnected()
 {
   return WiFi.status() == WL_CONNECTED;
+}
+
+bool weatherConfigured()
+{
+  return strlen(WEATHER_API_KEY) > 0 && strlen(WEATHER_CITY) > 0;
+}
+
+String extractJsonString(const String &json, const char *key, int startPos = 0)
+{
+  int keyPos = json.indexOf(key, startPos);
+  if (keyPos < 0)
+    return "";
+
+  keyPos += strlen(key);
+  int endPos = json.indexOf('"', keyPos);
+  if (endPos < 0)
+    return "";
+
+  return json.substring(keyPos, endPos);
+}
+
+float extractJsonFloat(const String &json, const char *key, float fallback, int startPos = 0)
+{
+  int keyPos = json.indexOf(key, startPos);
+  if (keyPos < 0)
+    return fallback;
+
+  keyPos += strlen(key);
+  int endPos = keyPos;
+  while (endPos < json.length() && (isDigit(json[endPos]) || json[endPos] == '.' || json[endPos] == '-'))
+  {
+    endPos++;
+  }
+
+  return json.substring(keyPos, endPos).toFloat();
+}
+
+int extractJsonInt(const String &json, const char *key, int fallback, int startPos = 0)
+{
+  return (int)lroundf(extractJsonFloat(json, key, fallback, startPos));
+}
+
+bool fetchWeather()
+{
+  if (!wifiConnected() || !weatherConfigured())
+  {
+    return false;
+  }
+
+  HTTPClient http;
+  String cityQuery = WEATHER_CITY;
+  cityQuery.replace(" ", "%20");
+
+  String url = String("http://api.openweathermap.org/data/2.5/weather?q=") +
+               cityQuery +
+               "&units=" + WEATHER_UNITS +
+               "&lang=" + WEATHER_LANG +
+               "&appid=" + WEATHER_API_KEY;
+
+  Serial.println("Recupero meteo...");
+  Serial.println(url);
+  http.begin(url);
+  int httpCode = http.GET();
+  if (httpCode != HTTP_CODE_OK)
+  {
+    String errorPayload = http.getString();
+    Serial.printf("Errore HTTP meteo: %d\n", httpCode);
+    if (errorPayload.length() > 0)
+    {
+      Serial.println("Dettaglio errore meteo:");
+      Serial.println(errorPayload);
+    }
+    http.end();
+    return false;
+  }
+
+  String payload = http.getString();
+  http.end();
+
+  int weatherArrayPos = payload.indexOf("\"weather\":[");
+  int mainPos = payload.indexOf("\"main\":");
+  if (weatherArrayPos < 0 || mainPos < 0)
+  {
+    Serial.println("Risposta meteo non valida.");
+    return false;
+  }
+
+  String icon = extractJsonString(payload, "\"icon\":\"", weatherArrayPos);
+  int conditionId = extractJsonInt(payload, "\"id\":", 800, weatherArrayPos);
+  float tempValue = extractJsonFloat(payload, "\"temp\":", 0.0f, mainPos);
+
+  if (icon.length() < 3)
+  {
+    Serial.println("Icona meteo non trovata.");
+    return false;
+  }
+
+  weatherData.valid = true;
+  weatherData.isDay = icon.endsWith("d");
+  weatherData.conditionId = conditionId;
+  weatherData.temperature = (int)lroundf(tempValue);
+  weatherData.lastUpdateMs = millis();
+  weatherRenderDirty = true;
+
+  Serial.printf("Meteo aggiornato: condizione=%d temp=%dC\n", weatherData.conditionId, weatherData.temperature);
+  return true;
 }
 
 void clearNewsRow()
@@ -565,6 +707,158 @@ void visualizzaInfoRiga(DateTime now)
   }
 }
 
+void drawSunIcon(int x, int y)
+{
+  uint16_t sunColor = dma_display->color565(255, 210, 40);
+  dma_display->fillCircle(x + 8, y + 8, 4, sunColor);
+  for (int i = 0; i < 8; i++)
+  {
+    float angle = i * PI / 4.0f;
+    int x1 = x + 8 + (int)lroundf(cos(angle) * 6);
+    int y1 = y + 8 + (int)lroundf(sin(angle) * 6);
+    int x2 = x + 8 + (int)lroundf(cos(angle) * 8);
+    int y2 = y + 8 + (int)lroundf(sin(angle) * 8);
+    dma_display->drawLine(x1, y1, x2, y2, sunColor);
+  }
+}
+
+void drawMoonIcon(int x, int y)
+{
+  uint16_t moonColor = dma_display->color565(255, 230, 180);
+  dma_display->fillCircle(x + 8, y + 8, 5, moonColor);
+  dma_display->fillCircle(x + 10, y + 6, 5, myBLACK);
+}
+
+void drawCloudIcon(int x, int y, uint16_t cloudColor)
+{
+  dma_display->fillCircle(x + 5, y + 9, 3, cloudColor);
+  dma_display->fillCircle(x + 9, y + 7, 4, cloudColor);
+  dma_display->fillCircle(x + 13, y + 9, 3, cloudColor);
+  dma_display->fillRect(x + 4, y + 9, 10, 4, cloudColor);
+}
+
+void drawRainDrops(int x, int y, uint16_t rainColor)
+{
+  dma_display->drawLine(x + 5, y + 12, x + 4, y + 14, rainColor);
+  dma_display->drawLine(x + 9, y + 12, x + 8, y + 15, rainColor);
+  dma_display->drawLine(x + 13, y + 12, x + 12, y + 14, rainColor);
+}
+
+void drawSnowFlakes(int x, int y, uint16_t snowColor)
+{
+  for (int i = 0; i < 3; i++)
+  {
+    int cx = x + 5 + i * 4;
+    int cy = y + 13;
+    dma_display->drawPixel(cx, cy, snowColor);
+    dma_display->drawPixel(cx - 1, cy, snowColor);
+    dma_display->drawPixel(cx + 1, cy, snowColor);
+    dma_display->drawPixel(cx, cy - 1, snowColor);
+    dma_display->drawPixel(cx, cy + 1, snowColor);
+  }
+}
+
+void drawLightning(int x, int y, uint16_t color)
+{
+  dma_display->drawLine(x + 9, y + 10, x + 7, y + 13, color);
+  dma_display->drawLine(x + 7, y + 13, x + 10, y + 13, color);
+  dma_display->drawLine(x + 10, y + 13, x + 8, y + 15, color);
+}
+
+void drawFog(int x, int y, uint16_t color)
+{
+  dma_display->drawLine(x + 3, y + 8, x + 13, y + 8, color);
+  dma_display->drawLine(x + 2, y + 11, x + 12, y + 11, color);
+  dma_display->drawLine(x + 4, y + 14, x + 14, y + 14, color);
+}
+
+void drawWeatherIcon(int x, int y)
+{
+  uint16_t cloudColor = dma_display->color565(190, 190, 190);
+  uint16_t rainColor = dma_display->color565(80, 180, 255);
+  uint16_t fogColor = dma_display->color565(150, 150, 150);
+  uint16_t lightningColor = dma_display->color565(255, 220, 0);
+  uint16_t snowColor = dma_display->color565(230, 230, 255);
+
+  int id = weatherData.conditionId;
+
+  if (id == 800)
+  {
+    if (weatherData.isDay)
+      drawSunIcon(x, y);
+    else
+      drawMoonIcon(x, y);
+    return;
+  }
+
+  if (id >= 801 && id <= 804)
+  {
+    if (weatherData.isDay)
+      drawSunIcon(x - 2, y - 1);
+    else
+      drawMoonIcon(x - 1, y - 1);
+    drawCloudIcon(x + 1, y + 2, cloudColor);
+    return;
+  }
+
+  drawCloudIcon(x, y + 1, cloudColor);
+
+  if (id >= 200 && id < 300)
+  {
+    drawLightning(x, y, lightningColor);
+    drawRainDrops(x, y, rainColor);
+  }
+  else if (id >= 300 && id < 600)
+  {
+    drawRainDrops(x, y, rainColor);
+  }
+  else if (id >= 600 && id < 700)
+  {
+    drawSnowFlakes(x, y, snowColor);
+  }
+  else if (id >= 700 && id < 800)
+  {
+    drawFog(x, y, fogColor);
+  }
+}
+
+void visualizzaMeteoGrande()
+{
+  dma_display->fillRect(0, TIME_AREA_TOP, PANEL_RES_X, TIME_AREA_HEIGHT, 0);
+
+  if (!weatherData.valid)
+  {
+    dma_display->setFont(&Org_01);
+    dma_display->setTextColor(myWHITE);
+    dma_display->setCursor(5, 10);
+    dma_display->print("meteo n/d");
+    dma_display->setFont();
+    weatherRenderDirty = false;
+    return;
+  }
+
+  drawWeatherIcon(4, 0);
+
+  String tempLabel = String(weatherData.temperature) + "C";
+  int16_t x1, y1;
+  uint16_t w, h;
+  dma_display->setFont(&FreeSans9pt7b);
+  dma_display->getTextBounds(tempLabel, 0, 0, &x1, &y1, &w, &h);
+
+  int textX = 23;
+  if (textX + w > PANEL_RES_X)
+  {
+    dma_display->setFont(&TomThumb);
+    textX = 22;
+  }
+
+  dma_display->setTextColor(dma_display->color565(180, 220, 255));
+  dma_display->setCursor(textX, 13);
+  dma_display->print(tempLabel);
+  dma_display->setFont();
+  weatherRenderDirty = false;
+}
+
 void visualizzaOraGrande(const String &hours, const String &minutes, const String &seconds)
 {
   String hh = hours;
@@ -827,6 +1121,7 @@ void setup()
   if (wifiConnected())
   {
     fetchRSSFeed();
+    fetchWeather();
   }
   else
   {
@@ -847,10 +1142,21 @@ void gestisciOrologio()
   char timeStr[9];
   sprintf(timeStr, "%s:%s:%s", hours, minutes, seconds);
 
-  if (strcmp(timeStr, lastTimeStr) != 0)
-  {                                                  // Aggiorna solo se cambia
+  bool shouldShowWeather = weatherConfigured() && weatherData.valid && ((millis() / topRowToggleInterval) % 2 == 1);
+
+  if (shouldShowWeather)
+  {
+    if (!topRowShowingWeather || weatherRenderDirty)
+    {
+      visualizzaMeteoGrande();
+      topRowShowingWeather = true;
+    }
+  }
+  else if ((strcmp(timeStr, lastTimeStr) != 0) || topRowShowingWeather)
+  {
     visualizzaOraGrande(hours, minutes, seconds);
     strcpy(lastTimeStr, timeStr);
+    topRowShowingWeather = false;
   }
 
   // Reload news list
@@ -964,6 +1270,12 @@ void loop()
       syncRTCwithNTP(); // Sincronizza ogni mez'ora
       Serial.println("Sincronizzazione RTC con NTP eseguita con successo.");
       lastUpdateTime = millis();
+    }
+    static unsigned long lastWeatherUpdate = 0;
+    if (weatherConfigured() && millis() > lastWeatherUpdate + weatherUpdateInterval)
+    {
+      fetchWeather();
+      lastWeatherUpdate = millis();
     }
     if (millis() > lastUpdateNews + newsUpdateInterval)
     {
