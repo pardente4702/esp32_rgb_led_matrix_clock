@@ -112,6 +112,7 @@ uint32_t newsUpdateInterval = 1200000; // 20 minuti
 uint32_t timeUpdateInterval = 3600000; // 1 ora
 uint32_t weatherUpdateInterval = 900000; // 15 minuti
 uint32_t topRowToggleInterval = 10000;   // 10 secondi
+uint32_t cityResolveRetryInterval = 3600000; // 1 ora
 
 int brightness = brightnessMax;
 
@@ -151,6 +152,8 @@ struct WeatherData
 WeatherData weatherData;
 bool topRowShowingWeather = false;
 bool weatherRenderDirty = true;
+String detectedWeatherCity = "";
+unsigned long lastCityResolveAttempt = 0;
 
 bool wifiConnected()
 {
@@ -159,7 +162,23 @@ bool wifiConnected()
 
 bool weatherConfigured()
 {
-  return strlen(WEATHER_API_KEY) > 0 && strlen(WEATHER_CITY) > 0;
+  return strlen(WEATHER_API_KEY) > 0;
+}
+
+String urlEncodeSimple(String value)
+{
+  value.replace(" ", "%20");
+  return value;
+}
+
+String getEffectiveWeatherCity()
+{
+  if (strlen(WEATHER_CITY) > 0)
+  {
+    return String(WEATHER_CITY);
+  }
+
+  return detectedWeatherCity;
 }
 
 String extractJsonString(const String &json, const char *key, int startPos = 0)
@@ -197,6 +216,84 @@ int extractJsonInt(const String &json, const char *key, int fallback, int startP
   return (int)lroundf(extractJsonFloat(json, key, fallback, startPos));
 }
 
+bool resolveWeatherCity()
+{
+  if (!wifiConnected())
+  {
+    return false;
+  }
+
+  String configuredCity = WEATHER_CITY;
+  if (configuredCity.length() > 0)
+  {
+    detectedWeatherCity = configuredCity;
+    return true;
+  }
+
+  if (detectedWeatherCity.length() > 0)
+  {
+    return true;
+  }
+
+  unsigned long nowMs = millis();
+  if (lastCityResolveAttempt != 0 && (nowMs - lastCityResolveAttempt) < cityResolveRetryInterval)
+  {
+    return false;
+  }
+  lastCityResolveAttempt = nowMs;
+
+  HTTPClient http;
+  String url = "http://ip-api.com/json/?fields=status,message,city,countryCode";
+  Serial.println("Rilevo automaticamente la citta'...");
+  Serial.println(url);
+  http.begin(url);
+  int httpCode = http.GET();
+  if (httpCode != HTTP_CODE_OK)
+  {
+    String errorPayload = http.getString();
+    Serial.printf("Errore HTTP geolocalizzazione: %d\n", httpCode);
+    if (errorPayload.length() > 0)
+    {
+      Serial.println("Dettaglio errore geolocalizzazione:");
+      Serial.println(errorPayload);
+    }
+    http.end();
+    return false;
+  }
+
+  String payload = http.getString();
+  http.end();
+
+  String status = extractJsonString(payload, "\"status\":\"");
+  if (status != "success")
+  {
+    Serial.println("Geolocalizzazione non riuscita.");
+    if (payload.length() > 0)
+    {
+      Serial.println(payload);
+    }
+    return false;
+  }
+
+  String city = extractJsonString(payload, "\"city\":\"");
+  String countryCode = extractJsonString(payload, "\"countryCode\":\"");
+  if (city.length() == 0)
+  {
+    Serial.println("Citta' non trovata nella geolocalizzazione.");
+    return false;
+  }
+
+  detectedWeatherCity = city;
+  if (countryCode.length() > 0)
+  {
+    detectedWeatherCity += "," + countryCode;
+  }
+
+  Serial.print("Citta' rilevata automaticamente: ");
+  Serial.println(detectedWeatherCity);
+  return true;
+}
+
 bool fetchWeather()
 {
   if (!wifiConnected() || !weatherConfigured())
@@ -204,9 +301,16 @@ bool fetchWeather()
     return false;
   }
 
+  String effectiveCity = getEffectiveWeatherCity();
+  if (effectiveCity.length() == 0 && !resolveWeatherCity())
+  {
+    Serial.println("Citta' meteo non disponibile.");
+    return false;
+  }
+
+  effectiveCity = getEffectiveWeatherCity();
   HTTPClient http;
-  String cityQuery = WEATHER_CITY;
-  cityQuery.replace(" ", "%20");
+  String cityQuery = urlEncodeSimple(effectiveCity);
 
   String url = String("http://api.openweathermap.org/data/2.5/weather?q=") +
                cityQuery +
