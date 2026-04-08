@@ -814,14 +814,14 @@ void visualizzaInfoRiga(DateTime now)
 void drawSunIcon(int x, int y)
 {
   uint16_t sunColor = dma_display->color565(255, 210, 40);
-  dma_display->fillCircle(x + 8, y + 8, 4, sunColor);
+  dma_display->fillCircle(x + 8, y + 8, 3, sunColor);
   for (int i = 0; i < 8; i++)
   {
     float angle = i * PI / 4.0f;
-    int x1 = x + 8 + (int)lroundf(cos(angle) * 6);
-    int y1 = y + 8 + (int)lroundf(sin(angle) * 6);
-    int x2 = x + 8 + (int)lroundf(cos(angle) * 8);
-    int y2 = y + 8 + (int)lroundf(sin(angle) * 8);
+    int x1 = x + 8 + (int)lroundf(cos(angle) * 5);
+    int y1 = y + 8 + (int)lroundf(sin(angle) * 5);
+    int x2 = x + 8 + (int)lroundf(cos(angle) * 7);
+    int y2 = y + 8 + (int)lroundf(sin(angle) * 7);
     dma_display->drawLine(x1, y1, x2, y2, sunColor);
   }
 }
