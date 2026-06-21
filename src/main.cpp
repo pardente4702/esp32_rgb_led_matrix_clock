@@ -125,6 +125,7 @@ List<String> newsList;
 
 unsigned long lastAttempt = 0;
 const long interval = 5000; // Try to reconnect every 5 seconds
+size_t currentWifiNetworkIndex = 0;
 
 enum InfoRowState
 {
@@ -1089,6 +1090,53 @@ bool waitForWiFiConnection(unsigned long timeoutMs)
   return wifiConnected();
 }
 
+void beginWiFiConnection(size_t networkIndex)
+{
+  currentWifiNetworkIndex = networkIndex;
+  WiFi.disconnect();
+  delay(100);
+  Serial.print("Connessione WiFi a ");
+  Serial.println(WIFI_NETWORKS[currentWifiNetworkIndex].ssid);
+  WiFi.begin(WIFI_NETWORKS[currentWifiNetworkIndex].ssid, WIFI_NETWORKS[currentWifiNetworkIndex].password);
+}
+
+bool connectToConfiguredWiFi(unsigned long timeoutMs)
+{
+  if (WIFI_NETWORK_COUNT == 0)
+  {
+    Serial.println("Nessuna rete WiFi configurata.");
+    return false;
+  }
+
+  for (size_t attempt = 0; attempt < WIFI_NETWORK_COUNT; attempt++)
+  {
+    size_t networkIndex = (currentWifiNetworkIndex + attempt) % WIFI_NETWORK_COUNT;
+    beginWiFiConnection(networkIndex);
+
+    if (waitForWiFiConnection(timeoutMs))
+    {
+      Serial.println();
+      return true;
+    }
+
+    Serial.println("\nConnessione non riuscita.");
+  }
+
+  return false;
+}
+
+void beginNextWiFiConnection()
+{
+  if (WIFI_NETWORK_COUNT == 0)
+  {
+    Serial.println("Nessuna rete WiFi configurata.");
+    return;
+  }
+
+  size_t nextNetworkIndex = (currentWifiNetworkIndex + 1) % WIFI_NETWORK_COUNT;
+  beginWiFiConnection(nextNetworkIndex);
+}
+
 void setup()
 {
   Serial.begin(115200);
@@ -1138,11 +1186,12 @@ void setup()
   // Connessione al WiFi
   Serial.println("In attesa di connettersi al WiFi");
   WiFi.mode(WIFI_STA);
-  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
 
-  if (waitForWiFiConnection(10000))
+  if (connectToConfiguredWiFi(10000))
   {
     Serial.println("\nConnesso al WiFi");
+    Serial.print("Rete: ");
+    Serial.println(WIFI_NETWORKS[currentWifiNetworkIndex].ssid);
     Serial.print("Indirizzo IP: ");
     Serial.println(WiFi.localIP());
 
@@ -1358,8 +1407,7 @@ void loop()
       newsList.removeAll();
       indiceNotizia = 0;
       textX = PANEL_RES_X;
-      WiFi.disconnect();
-      WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+      beginNextWiFiConnection();
       lastAttempt = millis();
     }
   }

@@ -1,9 +1,19 @@
 // WifiCredentials.h
 
-// Credenziali modem Roma
-//#define WIFI_SSID "FASTWEB-F7D7CB"  
-//#define WIFI_PASSWORD "48WJAR7FWJ"
+#include <stddef.h>
 
-// Credenziali modem Ladispoli
-#define WIFI_SSID "TIM_2rN62P"  
-#define WIFI_PASSWORD "4JTW3BQA66"
+struct WifiNetworkCredential
+{
+  const char *ssid;
+  const char *password;
+};
+
+const WifiNetworkCredential WIFI_NETWORKS[] = {
+    // Credenziali modem Roma
+    {"FASTWEB-F7D7CB", "48WJAR7FWJ"},
+
+    // Credenziali modem Ladispoli
+    {"TIM_2rN62P", "4JTW3BQA66"},
+};
+
+const size_t WIFI_NETWORK_COUNT = sizeof(WIFI_NETWORKS) / sizeof(WIFI_NETWORKS[0]);
